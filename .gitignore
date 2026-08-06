@@ -31,3 +31,7 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Local frontend / nginx runtime ###
+frontend/logs/
+*.pid
