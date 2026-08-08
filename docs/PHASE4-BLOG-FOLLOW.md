@@ -62,6 +62,8 @@
 
 ## 4. 端到端：点赞（ZSet）
 
+**ZSet（有序集合）**：`member` 唯一 + `score` 排序。本阶段两处用它——`blog:liked:*`（谁赞过、谁先赞）和后面的 `feed:*`（收件箱按时间）。常用命令直觉：`ZADD` 加入、`ZSCORE` 判断是否点过、`ZREM` 取消、`ZRANGE` / `ZREVRANGEBYSCORE` 按分取一段。比纯 Set 多了按时间排序与翻页的能力。
+
 ```
 浏览器 PUT /api/blog/like/{blogId}（已登录）
   → BlogController.likeBlog
@@ -177,7 +179,7 @@
 curl -s -X PUT "http://127.0.0.1:8081/follow/USER_A_ID/true" \
   -H "authorization: TOKEN_B"
 
-redis-cli -a 001020 --no-auth-warning SMEMBERS follows:USER_B_ID
+redis-cli -a '<redis-password>' --no-auth-warning SMEMBERS follows:USER_B_ID
 # 应含 USER_A_ID
 ```
 
@@ -189,7 +191,7 @@ redis-cli -a 001020 --no-auth-warning SMEMBERS follows:USER_B_ID
 curl -s -X PUT "http://127.0.0.1:8081/blog/like/BLOG_ID" \
   -H "authorization: TOKEN_B"
 
-redis-cli -a 001020 --no-auth-warning ZRANGE blog:liked:BLOG_ID 0 -1 WITHSCORES
+redis-cli -a '<redis-password>' --no-auth-warning ZRANGE blog:liked:BLOG_ID 0 -1 WITHSCORES
 curl -s "http://127.0.0.1:8081/blog/likes/BLOG_ID" \
   -H "authorization: TOKEN_B" | python3 -m json.tool
 ```
@@ -214,7 +216,7 @@ curl -s -X POST "http://127.0.0.1:8081/blog" \
 ```
 
 ```bash
-redis-cli -a 001020 --no-auth-warning ZRANGE feed:USER_B_ID 0 -1 WITHSCORES
+redis-cli -a '<redis-password>' --no-auth-warning ZRANGE feed:USER_B_ID 0 -1 WITHSCORES
 # 应出现刚发的 blogId
 ```
 

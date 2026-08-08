@@ -48,7 +48,7 @@
 
 重要后果：
 
-1. **库存与一人一单先在 Redis 判完**，接口立刻返回 `orderId`；MySQL 订单可能稍后才出现。  
+1. **库存与一人一单先在 Redis 判完**，接口立刻返回 `orderId`；真正写 MySQL 订单是 Stream 消费者异步做的——短暂「有 orderId、库还没有 / Redis 已扣、MySQL 未扣」是设计代价，正常最终由消费者对齐。  
 2. **必须先有** `seckill:stock:{id}`（建券时写入），且 Stream 消费组已创建，否则启动时报 `NOGROUP` 或秒杀直接失败。  
 3. 注释里的同步路径仍保留 `getResult`，便于对照「一人一单 + 乐观扣库存」怎么写。
 
@@ -89,14 +89,19 @@
           → return 0
   → 立刻 Result.ok(orderId)                 // 此时 DB 可能还没有订单
 
-后台单线程（@PostConstruct 死循环）：
+后台单线程（@PostConstruct 启动时拉起死循环）：
+  // Redis Stream = Redis 自带消息队列；本项目用 stream.orders
   XREADGROUP GROUP g1 c1 COUNT 1 BLOCK 2s STREAMS stream.orders >
   → 解析成 VoucherOrder
   → handleVoucherOrder：
        Redisson tryLock(lock:order:{userId})
        → createVoucherOrder：DB stock>0 扣减 + INSERT tb_voucher_order
+            // MyBatis-Plus：ISeckillVoucherService → SeckillVoucherMapper(BaseMapper)
+            // update(wrapper) 自动生成 SQL，对应 XML 可为空
   → XACK stream.orders g1 {msgId}
-  异常 → handlePendingList：读 pending（offset 0）重试再 ACK
+  异常 → handlePendingList：读已读未 ACK 的 pending（offset 0）重试再 ACK
+       // 避免崩溃丢单；但本实现是单线程：某条一直失败会卡在 pending，
+       // 后面新消息暂时落不了库（接口层 Lua 仍可能扣 Redis 并返回 orderId）
 ```
 
 对比注释里的同步 Redisson 版：
@@ -126,7 +131,7 @@
 | `1` | 库存不足 | 「库存不足」 |
 | `2` | Set 里已有该用户 | 「禁止重复下单」 |
 
-脚本内 `KEYS` 为空，业务 key 全用 `ARGV` 拼接——和课程写法一致；学习时记住：**判断 + 扣减 + 入队必须在同一 Lua 里**，拆成多次 Redis 命令仍有竞态。
+脚本内 `KEYS` 为空，业务 key 全用 `ARGV` 拼接——和课程写法一致。外挂 Lua 的目的，就是把「读库存 → 判一人一单 → 扣库存 → 入队」收成**一次原子执行**，避免多条 Redis 命令被插队导致超卖/重复下单。拆成多次命令仍有竞态；Lua 成功也不等于 MySQL 订单已写完（见 §2 / §4）。
 
 ### 5.2 `SimpleRedisLock` vs Redisson
 
@@ -175,7 +180,7 @@ NOGROUP No such key 'stream.orders' or consumer group 'g1'
 先执行：
 
 ```bash
-redis-cli -a 001020 --no-auth-warning XGROUP CREATE stream.orders g1 '$' MKSTREAM
+redis-cli -a '<redis-password>' --no-auth-warning XGROUP CREATE stream.orders g1 '$' MKSTREAM
 ```
 
 再启动后端（或重启）。
@@ -205,7 +210,7 @@ curl -s http://127.0.0.1:8081/voucher/seckill \
 ```
 
 ```bash
-redis-cli -a 001020 --no-auth-warning GET seckill:stock:VID
+redis-cli -a '<redis-password>' --no-auth-warning GET seckill:stock:VID
 # 应为 100
 ```
 
@@ -218,8 +223,8 @@ curl -s http://127.0.0.1:8081/voucher-order/seckill/VID \
 ```
 
 ```bash
-redis-cli -a 001020 --no-auth-warning GET seckill:stock:VID          # 99
-redis-cli -a 001020 --no-auth-warning SMEMBERS seckill:order:VID     # 有你的 userId
+redis-cli -a '<redis-password>' --no-auth-warning GET seckill:stock:VID          # 99
+redis-cli -a '<redis-password>' --no-auth-warning SMEMBERS seckill:order:VID     # 有你的 userId
 # 稍等异步消费者后查库：
 # SELECT * FROM tb_voucher_order WHERE id = 上一步 orderId;
 ```
@@ -233,7 +238,7 @@ curl -s http://127.0.0.1:8081/voucher-order/seckill/VID \
 # → 禁止重复下单
 
 # 把库存打成 0 后再抢（换新用户或先改 Redis）
-redis-cli -a 001020 --no-auth-warning SET seckill:stock:VID 0
+redis-cli -a '<redis-password>' --no-auth-warning SET seckill:stock:VID 0
 # 新用户抢 → 库存不足
 ```
 

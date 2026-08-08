@@ -9,12 +9,12 @@
 |------|------|--------|
 | 1 | `ShopController` | `GET /shop/{id}` → `queryById` |
 | 2 | `ShopServiceImpl.queryById` | **当前启用哪条策略**（注释掉的是演进过程） |
-| 3 | `CacheClient` | 通用封装：`queryWithPassThrough` / `queryWithLogicalExpire` / `setWithLogicalExpire` |
-| 4 | `RedisData` | 逻辑过期：`{ data, expireTime }` |
+| 3 | `CacheClient` | 通用封装：穿透 `queryWithPassThrough`；逻辑过期读 `queryWithLogicalExpire`、写 `setWithLogicalExpire` |
+| 4 | `RedisData` | 逻辑过期包装：`{ data, expireTime }` |
 | 5 | `ShopServiceImpl` 里注释掉的三个私有方法 | 穿透 / 互斥锁击穿 / 逻辑过期击穿的「手写版」 |
-| 6 | `ShopTypeServiceImpl` | 类型列表用 Redis **List**（对比店铺用 String） |
+| 6 | `ShopTypeServiceImpl` | **分类列表** `cache:type`（List），不是「某 type 下的店」 |
 | 7 | `RedisConstants`（`CACHE_*` / `LOCK_*`） | Key 与 TTL |
-| 8 | `RedisTest.testSaveShop` | **逻辑过期必须预热** |
+| 8 | `RedisTest.testSaveShop` | 课程/仓库自带测试，给逻辑过期 **预热** `cache:shop:{id}` |
 
 前端对照：`frontend/shop-detail.html`（调 `/api/shop/{id}`，白名单可不登录）。
 
@@ -48,8 +48,10 @@
 | 问题 | 现象 | 本项目解法 |
 |------|------|------------|
 | **穿透** | 查根本不存在的 id，缓存永远 miss → 打爆 DB | 缓存**空值** `""`，短 TTL（`CACHE_NULL_TTL`） |
-| **击穿** | 热点 key 正好过期，大量请求同时打 DB | **互斥锁**（只一人重建）或 **逻辑过期**（先返回旧值，异步重建） |
+| **击穿** | 热点 key 正好过期，大量请求同时打 DB | **互斥锁**（只一人重建）或 **逻辑过期**（先返回可能已过期的旧值，异步重建）——用短暂陈旧换不打爆 DB |
 | **雪崩** | 大量 key 同一时刻过期 → 同时打 DB | TTL 错开 / 多级缓存；本课店铺侧重点在前两个，类型 List 无统一大 TTL 也算一种「永不过期式」取舍 |
+
+穿透 / 击穿 / 雪崩是**通用缓存问题**；本课用查商户演示，但同一套思路可套到别的热点读。
 
 ```
 正常：  请求 → Redis 命中 → 返回
@@ -93,6 +95,8 @@ miss → tryLock
 | 是否必须预热 | 否（miss 会查库） | **是** |
 | 穿透 | 常配合空值 | **本身不管穿透**（无 key 当不存在） |
 
+`CacheClient` 把上面两条主路径收成可复用方法：`queryWithPassThrough` 负责「空值挡穿透」；`setWithLogicalExpire` 写入 `{data, expireTime}`，`queryWithLogicalExpire` 读出后按逻辑时间决定是否异步重建。物理 Key 往往不设短 TTL，过期靠 JSON 里的时间；异步重建会覆盖旧 JSON。若 Key 被删且未再预热，当前实现会直接当「不存在」（不查库）。
+
 ## 5. 穿透：空值怎么挡
 
 意图（注释版 / `queryWithPassThrough`）：
@@ -114,7 +118,9 @@ GET cache:shop:{id}
 |-----|------|------------|------|
 | `cache:shop:{id}` | String | 逻辑过期：JSON 内 `expireTime`；穿透/互斥版：真实 TTL 30min | Shop JSON 或 `RedisData` 包装 |
 | `lock:shop:{id}` | String | 10s（`SET NX EX`） | 缓存重建互斥锁 |
-| `cache:type` | List | 本实现未设 TTL | 每个元素一个 `ShopType` JSON |
+| `cache:type` | List | 本实现未设 TTL | 每个元素一个 `ShopType` JSON（美食、KTV…） |
+
+`GET /shop-type/list` 取的是**分类列表**，没有 shop id。某分类下的店是 `GET /shop/of/type?typeId=…`；店铺详情 `GET /shop/{id}` 响应里自带 `typeId`，一般不必再查 type 表。
 
 更新店铺：`update` 先改 MySQL，再 `DEL cache:shop:{id}`（Cache Aside）。  
 逻辑过期场景下删 Key 后，下次查询会「像未预热」一样直接 miss——生产上逻辑过期常配合主动重建，而不是只删。
@@ -134,7 +140,8 @@ mvn -q -Dtest=RedisTest#testSaveShop test
 或用 Redis 看结果：
 
 ```bash
-redis-cli -a 001020 --no-auth-warning GET cache:shop:1
+# <redis-password> 见 application.yaml → spring.redis.password
+redis-cli -a '<redis-password>' --no-auth-warning GET cache:shop:1
 # 应看到含 "data" 与 "expireTime" 的 JSON（不是裸 Shop）
 ```
 
@@ -147,7 +154,7 @@ curl -s http://127.0.0.1:8081/shop/1 | python3 -m json.tool | head -40
 ### 7.3 体会「未预热 = 逻辑过期当不存在」
 
 ```bash
-redis-cli -a 001020 --no-auth-warning DEL cache:shop:1
+redis-cli -a '<redis-password>' --no-auth-warning DEL cache:shop:1
 curl -s http://127.0.0.1:8081/shop/1
 # → success:false, 店铺不存在   （尽管 MySQL 里有 id=1）
 # 再预热后恢复
@@ -163,9 +170,9 @@ Shop shop = cacheClient.queryWithPassThrough(
 ```
 
 ```bash
-redis-cli -a 001020 --no-auth-warning DEL cache:shop:999999
+redis-cli -a '<redis-password>' --no-auth-warning DEL cache:shop:999999
 curl -s http://127.0.0.1:8081/shop/999999   # 第一次打 DB，写空值
-redis-cli -a 001020 --no-auth-warning GET cache:shop:999999
+redis-cli -a '<redis-password>' --no-auth-warning GET cache:shop:999999
 curl -s http://127.0.0.1:8081/shop/999999   # 第二次不应再打 DB
 ```
 
@@ -174,10 +181,10 @@ curl -s http://127.0.0.1:8081/shop/999999   # 第二次不应再打 DB
 ### 7.5 类型 List 缓存
 
 ```bash
-redis-cli -a 001020 --no-auth-warning DEL cache:type
+redis-cli -a '<redis-password>' --no-auth-warning DEL cache:type
 curl -s http://127.0.0.1:8081/shop-type/list >/dev/null   # 回源写 List
-redis-cli -a 001020 --no-auth-warning LLEN cache:type
-redis-cli -a 001020 --no-auth-warning LRANGE cache:type 0 0
+redis-cli -a '<redis-password>' --no-auth-warning LLEN cache:type
+redis-cli -a '<redis-password>' --no-auth-warning LRANGE cache:type 0 0
 ```
 
 浏览器：http://127.0.0.1:8080/ → 点进商户详情（需缓存已预热）。

@@ -37,14 +37,16 @@
 
 | 问题 | 现象 | 本项目解法 |
 |------|------|------------|
-| **附近的店** | 按距离排序、限定半径，DB 算球面距离又慢又难分页 | Redis **GEO**：按类型一个集合，member=店铺 id，坐标=经纬度 |
-| **签到 / 连续天数** | 每人每天一记，用行存或 Hash 太浪费 | **Bitmap**：一天占 1 bit；从今天往回数连续 `1` |
+| **附近的店** | 按距离排序、限定半径，DB 算球面距离又慢又难分页 | Redis **GEO**（`shop:geo:{typeId}`）：按类型一个集合，member=店铺 id，坐标=经纬度；学习时常需 `RedisTest#testLoadShopData` 预热 |
+| **签到 / 连续天数** | 每人每天一记，用行存或 Hash 太浪费 | **Bitmap**：一天占 1 bit；统计连续签到时从今天往回数连续 `1` |
 
 ```
 附近店：  预热 GEOADD → GEOSEARCH 半径内按距离排序 → 截分页 → 查 Shop 填 distance
 签到：    SETBIT sign:yyyy:MM:{uid} (日-1) 1
 连续：    BITFIELD 取本月前 N 位 → 从今天对应位往回数有多少个连续 1
 ```
+
+中间件启停与 nginx / Redis 分工见根目录 [`README.md`](../README.md)「本机运行」。
 
 ## 4. 端到端：附近商户（GEO）
 
@@ -143,9 +145,9 @@ mvn -q -Dtest=RedisTest#testLoadShopData test
 ```
 
 ```bash
-redis-cli -a 001020 --no-auth-warning ZCARD shop:geo:1
+redis-cli -a '<redis-password>' --no-auth-warning ZCARD shop:geo:1
 # > 0 说明该类型已入库
-redis-cli -a 001020 --no-auth-warning GEOPOS shop:geo:1 1
+redis-cli -a '<redis-password>' --no-auth-warning GEOPOS shop:geo:1 1
 # 看店铺 1 的坐标
 ```
 
@@ -173,7 +175,7 @@ curl -s "http://127.0.0.1:8081/shop/of/type?typeId=1&current=1" | python3 -m jso
 # TOKEN 同 Phase 1
 curl -s -X POST "http://127.0.0.1:8081/user/sign" -H "authorization: TOKEN"
 
-redis-cli -a 001020 --no-auth-warning \
+redis-cli -a '<redis-password>' --no-auth-warning \
   GETBIT sign:$(date +%Y:%m):USER_ID $(( $(date +%d) - 1 ))
 # → 1
 
