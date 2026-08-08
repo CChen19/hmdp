@@ -60,12 +60,29 @@
 雪崩：  一片 key 同时过期 → 流量洪峰打 DB
 ```
 
-## 4. 端到端：逻辑过期（当前路径）
+逻辑过期挡击穿时的并发画面（帮助理解「短暂陈旧」）：
+
+```
+请求A → 命中已逻辑过期的旧 JSON → 抢到锁 → 异步查 DB 重建 → 立刻返回旧数据
+请求B/C → 同样命中旧 JSON → 抢锁失败 → 也立刻返回旧数据（不去 DB）
+```
+
+只有 A 打库；B/C 用旧缓存顶着。店名若刚改过，这几秒用户仍可能看到旧名。
+
+## 4. `CacheClient` 三个方法 + 逻辑过期路径
+
+| 方法 | 做什么 | 防什么 |
+|------|--------|--------|
+| `setWithLogicalExpire` | 写入 `RedisData{data, expireTime}`；Key **常不设** Redis TTL | （写工具） |
+| `queryWithPassThrough` | miss 查库；DB 也没有则缓存空值短 TTL | **穿透**（当前 `queryById` 未启用） |
+| `queryWithLogicalExpire` | 无 Key → null（不查库）；有 Key 则按 `expireTime` 决定是否异步重建，**总是先返回已有 data** | **击穿**（线上启用） |
+
+旧缓存会**一直留在 Redis**，直到异步重建覆盖，或业务主动 `DEL`（如 `update`）。逻辑过期到了只表示 JSON 里时间过时，不是 Redis 把 Key 删了。
 
 ```
 预热（一次性 / 定时）：
   Shop → RedisData{ data: Shop, expireTime: now+30min }
-  → SET cache:shop:{id}  （注意：Redis 本身可无 TTL，过期靠 JSON 里的时间）
+  → SET cache:shop:{id}  （过期靠 JSON 里的时间）
 
 浏览器 GET /api/shop/1
   → ShopController → ShopServiceImpl.queryById
@@ -95,8 +112,6 @@ miss → tryLock
 | 是否必须预热 | 否（miss 会查库） | **是** |
 | 穿透 | 常配合空值 | **本身不管穿透**（无 key 当不存在） |
 
-`CacheClient` 把上面两条主路径收成可复用方法：`queryWithPassThrough` 负责「空值挡穿透」；`setWithLogicalExpire` 写入 `{data, expireTime}`，`queryWithLogicalExpire` 读出后按逻辑时间决定是否异步重建。物理 Key 往往不设短 TTL，过期靠 JSON 里的时间；异步重建会覆盖旧 JSON。若 Key 被删且未再预热，当前实现会直接当「不存在」（不查库）。
-
 ## 5. 穿透：空值怎么挡
 
 意图（注释版 / `queryWithPassThrough`）：
@@ -112,7 +127,17 @@ GET cache:shop:{id}
 
 布隆过滤器是另一条路（本项目未实现）：启动时把存在的 id 放进过滤器，明显假 id 直接拒。
 
-## 6. Redis Key 速查
+## 6. 接口分工与 Redis Key
+
+前端常见链路（别把「分类」和「店铺」混成一个接口）：
+
+```
+首页分类：GET /shop-type/list              ← 无 shop id；返回的 id 是 typeId
+点分类：  GET /shop/of/type?typeId=1       ← 传分类 id，要的是店列表
+点某店：  GET /shop/{id}                   ← 这时才传店铺 id（路径参数）
+```
+
+详情响应当中已有 `Shop.typeId`（数字外键），本项目详情页一般不再联查 `ShopType` 表要分类名。
 
 | Key | 类型 | TTL / 过期 | 内容 |
 |-----|------|------------|------|
@@ -120,7 +145,10 @@ GET cache:shop:{id}
 | `lock:shop:{id}` | String | 10s（`SET NX EX`） | 缓存重建互斥锁 |
 | `cache:type` | List | 本实现未设 TTL | 每个元素一个 `ShopType` JSON（美食、KTV…） |
 
-`GET /shop-type/list` 取的是**分类列表**，没有 shop id。某分类下的店是 `GET /shop/of/type?typeId=…`；店铺详情 `GET /shop/{id}` 响应里自带 `typeId`，一般不必再查 type 表。
+「一部分在 Redis、一部分在 DB」怎么理解：
+
+- **`cache:type`**：整表缓存——List 非空就全用 Redis；空则整表从 DB 拉出再全部写入。不会半边 Redis、半边 DB 拼分类列表。
+- **`cache:shop:{id}`**：按 id 独立。可以 1、2 在缓存、3 不在。逻辑过期下 3 miss → 直接当不存在（不查库）；若改用穿透方案，miss 才会回源 DB 再写回。
 
 更新店铺：`update` 先改 MySQL，再 `DEL cache:shop:{id}`（Cache Aside）。  
 逻辑过期场景下删 Key 后，下次查询会「像未预热」一样直接 miss——生产上逻辑过期常配合主动重建，而不是只删。
@@ -193,8 +221,10 @@ redis-cli -a '<redis-password>' --no-auth-warning LRANGE cache:type 0 0
 
 - [ ] 能区分穿透 / 击穿 / 雪崩，各举一个本项目场景
 - [ ] 说出当前 `queryById` 用的是逻辑过期，且**必须预热**
-- [ ] 看懂 `RedisData`：物理 Key 可不设 TTL，逻辑时间在 JSON 里
+- [ ] 分清 `setWithLogicalExpire` / `queryWithLogicalExpire` / `queryWithPassThrough` 各自职责
+- [ ] 看懂 `RedisData`：旧 Key 常一直保留到被覆盖或主动删除
 - [ ] 能对比互斥锁 vs 逻辑过期：延迟 vs 一致性
+- [ ] 分清 `/shop-type/list`、`/shop/of/type`、`/shop/{id}` 各自传什么 id
 - [ ] 知道更新为何「先 DB 后删缓存」
 - [ ] 演示：预热 → `/shop/1` 成功；删 Key → 立刻「不存在」；类型 List 回源一次后命中
 - [ ] （加分）临时切 `queryWithPassThrough`，演示假 id 空值缓存
