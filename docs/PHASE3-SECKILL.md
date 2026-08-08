@@ -65,43 +65,55 @@
 当前：  Lua 在 Redis 原子判定 → 立刻返回 → Stream 慢慢写 DB
 ```
 
-## 4. 端到端：Lua + Stream（当前路径）
+## 4. 端到端串一遍（当前路径）
 
 ```
-建秒杀券（一次性）：
-  POST /voucher/seckill
+① 浏览器（已登录）
+   POST /voucher-order/seckill/{voucherId}
+        │
+② VoucherOrderController
+        │
+③ VoucherOrderServiceImpl.seckillVoucher
+   · UserHolder 取 userId
+   · RedisIdWorker 生成 orderId
+   · 执行 seckill.lua
+        │
+④ Redis（Lua，原子）
+   · 库存够？一人一单？
+   · 够 → 扣 seckill:stock → SADD seckill:order → XADD stream.orders
+   · 立刻返回 orderId 给前端     ← 这时 MySQL 可能还没有订单
+        │
+⑤ @PostConstruct 起的后台线程（Bean 装好后一直跑）
+   XREADGROUP stream.orders（消费组 g1 / 消费者 c1）
+        │
+⑥ handleVoucherOrder
+   Redisson 锁 lock:order:{userId}
+        │
+⑦ createVoucherOrder（@Transactional）
+   seckillVoucherService.update(...)  → 扣 DB 库存
+   this.save(voucherOrder)            → 插订单
+        │
+⑧ MyBatis-Plus → Mapper → MySQL
+   SeckillVoucherMapper / VoucherOrderMapper
+        │
+⑨ 落库成功 → XACK
+   异常 → handlePendingList（读 pending 重试）
+```
+
+再压成三句：
+
+1. **接口 + Lua**：在 Redis 里判定并占坑，马上给 `orderId`  
+2. **Stream + `@PostConstruct`**：把「待写库」的消息异步取出来  
+3. **Service → Mapper → MySQL**：真正扣库存、写订单  
+
+建券 / 消费组（一次性前置）：
+
+```
+POST /voucher/seckill
   → 写 tb_voucher + tb_seckill_voucher
   → SET seckill:stock:{voucherId} = stock
 
-启动前（一次性）：
-  XGROUP CREATE stream.orders g1 $ MKSTREAM
-
-浏览器「限时抢购」（已登录）：
-  POST /api/voucher-order/seckill/{voucherId}
-  → VoucherOrderController
-  → RedisIdWorker.nextId("order")          // 先生成订单 id
-  → EVAL seckill.lua ARGV=[voucherId, userId, orderId]
-       1) GET seckill:stock:{id} ≤ 0  → return 1（库存不足）
-       2) SISMEMBER seckill:order:{id} userId → return 2（重复下单）
-       3) INCRBY stock -1
-          SADD order set userId
-          XADD stream.orders * userId / voucherId / id
-          → return 0
-  → 立刻 Result.ok(orderId)                 // 此时 DB 可能还没有订单
-
-后台单线程（@PostConstruct 启动时拉起死循环）：
-  // Redis Stream = Redis 自带消息队列；本项目用 stream.orders
-  XREADGROUP GROUP g1 c1 COUNT 1 BLOCK 2s STREAMS stream.orders >
-  → 解析成 VoucherOrder
-  → handleVoucherOrder：
-       Redisson tryLock(lock:order:{userId})
-       → createVoucherOrder：DB stock>0 扣减 + INSERT tb_voucher_order
-            // MyBatis-Plus：ISeckillVoucherService → SeckillVoucherMapper(BaseMapper)
-            // update(wrapper) 自动生成 SQL，对应 XML 可为空
-  → XACK stream.orders g1 {msgId}
-  异常 → handlePendingList：读已读未 ACK 的 pending（offset 0）重试再 ACK
-       // 避免崩溃丢单；但本实现是单线程：某条一直失败会卡在 pending，
-       // 后面新消息暂时落不了库（接口层 Lua 仍可能扣 Redis 并返回 orderId）
+XGROUP CREATE stream.orders g1 $ MKSTREAM
 ```
 
 对比注释里的同步 Redisson 版：
@@ -121,9 +133,21 @@
 | 一致性 | 较强（同步写完） | 允许短暂「有 orderId、库还没有」 |
 | 运维前提 | 无 Stream | **必须建消费组**；库存须预热 |
 
-## 5. Lua / 锁 / 订单号：怎么读
+## 5. Lua / Stream / 落库：怎么读
 
-### 5.1 `seckill.lua` 返回值
+### 5.1 为什么要外挂 Lua（不是「Lua 就是下单」）
+
+外挂 Lua 的目的：把「读库存 → 判一人一单 → 扣库存 → 入队」收成**一次原子执行**。若用 Java 连发多条 Redis 命令，中间会被别的客户端插队，仍可能超卖 / 重复下单。
+
+但 Lua **不等于完整下单**：
+
+| 步骤 | 谁做 | 做什么 |
+|------|------|--------|
+| 秒杀瞬间 | **Lua** | 判资格、扣 Redis 库存、`SADD`、`XADD` → 立刻返回 `orderId` |
+| 稍后 | **Stream 消费者** | `createVoucherOrder`：扣 DB 库存 + `INSERT tb_voucher_order` |
+
+记成：**Lua = Redis 侧占坑；DB = 最终持久化。**  
+`unlock.lua` 同理：比对锁标识再 `DEL`，避免拆成两步时误删别人的锁。
 
 | 返回 | 含义 | Java 提示 |
 |------|------|-----------|
@@ -131,27 +155,100 @@
 | `1` | 库存不足 | 「库存不足」 |
 | `2` | Set 里已有该用户 | 「禁止重复下单」 |
 
-脚本内 `KEYS` 为空，业务 key 全用 `ARGV` 拼接——和课程写法一致。外挂 Lua 的目的，就是把「读库存 → 判一人一单 → 扣库存 → 入队」收成**一次原子执行**，避免多条 Redis 命令被插队导致超卖/重复下单。拆成多次命令仍有竞态；Lua 成功也不等于 MySQL 订单已写完（见 §2 / §4）。
+### 5.2 Stream 是什么；`@PostConstruct` / pending 干什么
 
-### 5.2 `SimpleRedisLock` vs Redisson
+**Stream** = Redis 自带的消息队列（本项目 key：`stream.orders`）。相对用 List 当队列，多了消息 ID、消费组、ACK、pending 重试。
+
+| 能力 | 含义 |
+|------|------|
+| `XADD` | Lua 秒杀成功后往队列塞「待落库订单」 |
+| 消费组 `g1` | 组内协作消费；本课单消费者 `c1` |
+| `XACK` | 处理完才确认；没确认进 pending |
+| `>` vs `0` | `>` 读新消息；`0` 读已投递未 ACK 的 pending |
+
+**`@PostConstruct init()`**：Spring 装好 `VoucherOrderServiceImpl` 后自动跑一次，提交单线程死循环——应用一启动就有人在后台拆 Stream 消息写库（不是用户点秒杀才启动消费者）。
+
+**`handlePendingList`**：读出来 ≠ 处理成功。落库抛错 / 进程崩溃导致没 ACK 时，消息留在 pending；若只读 `>` 会永远拿不到它。所以 `catch` 里用 offset `0` 重试再 ACK，避免「Redis 已扣、DB 没单」。
+
+一直失败会怎样（课程版局限）：
+
+- `handlePendingList` 死循环刷同一条 pending，成功 ACK 前不 `break`
+- 消费者又是**单线程** → **后面新消息全部卡住落不了库**
+- 接口层 Lua 仍可能继续成功、返回 `orderId`（Redis 库存继续减）
+- 没有最大重试 / 死信 / 跳过毒消息——生产需另补
+
+### 5.3 异步落库怎么写进 MySQL（Service → Mapper）
+
+`createVoucherOrder` 核心两步：
+
+```java
+seckillVoucherService.update(
+    new LambdaUpdateWrapper<SeckillVoucher>()
+        .eq(SeckillVoucher::getVoucherId, voucherOrder.getVoucherId())
+        .gt(SeckillVoucher::getStock, 0)
+        .setSql("stock=stock-1"));
+this.save(voucherOrder);
+```
+
+大致 SQL：
+
+```sql
+UPDATE tb_seckill_voucher SET stock = stock - 1
+WHERE voucher_id = ? AND stock > 0;
+
+INSERT INTO tb_voucher_order (id, user_id, voucher_id, ...) VALUES (...);
+```
+
+`gt(stock, 0)` 是乐观条件，防库存减到负数；订单 `id` 来自 Stream 消息（`RedisIdWorker`），主键 `IdType.INPUT`。  
+走代理调用故 `@Transactional` 生效：中途抛异常会回滚。但当前实现若 `update` 影响 0 行却不抛异常，仍可能继续 `save`——偏粗糙。
+
+`seckillVoucherService` 如何接到 MyBatis：
+
+```
+ISeckillVoucherService extends IService<SeckillVoucher>
+  → SeckillVoucherServiceImpl extends ServiceImpl<SeckillVoucherMapper, SeckillVoucher>
+  → SeckillVoucherMapper extends BaseMapper<SeckillVoucher>
+  → 实体 @TableName("tb_seckill_voucher")
+```
+
+- 接口：`src/main/java/com/hmdp/mapper/SeckillVoucherMapper.java`
+- XML：`src/main/resources/mapper/SeckillVoucherMapper.xml`（可为空；`update(wrapper)` 不依赖手写 XML）
+- 启动类 `@MapperScan("com.hmdp.mapper")` 注册 Mapper；通用 CRUD 在 MyBatis-Plus 父类里
+
+### 5.4 Redis 与 MySQL 库存会不会不同步
+
+会。**短时间不同步是异步设计故意接受的**（最终一致，不是强一致）：
+
+```
+建券时：Redis stock = MySQL stock
+秒杀瞬间：Lua 先扣 Redis
+稍后：    消费者再扣 MySQL
+```
+
+| 情况 | 结果 |
+|------|------|
+| 正常延迟 | Redis 已少、MySQL 尚未少（预期） |
+| 消费者卡住 / 一直失败 | Redis 已扣，MySQL 可能没扣，订单也可能没有 |
+| DB 扣失败却未回补 Redis | 两边基准漂掉（本课补偿不完善） |
+
+秒杀瞬间以 **Redis 为准**拦超卖；MySQL 是最终账本。生产常补：重试上限、死信、失败回补 Redis、对账校准。
+
+### 5.5 `SimpleRedisLock` vs Redisson
 
 | | `SimpleRedisLock` | Redisson `RLock` |
 |--|-------------------|------------------|
 | 加锁 | `SET lock:{name} {uuid-threadId} NX EX` | `tryLock()`（可重入、看门狗续期等） |
-| 解锁 | `unlock.lua`：值相等才 `DEL`（防误删别人的锁） | `unlock()` |
-| 本项目 | 注释演进用；缓存重建也曾用同类思路 | **当前**异步落库兜底 |
+| 解锁 | `unlock.lua`：值相等才 `DEL` | `unlock()` |
+| 本项目 | 注释演进用 | **当前**异步落库兜底 |
 
-手写锁要自己处理：锁超时、误删、可重入、续期。课程用 Redisson 收尾是合理取舍。
-
-### 5.3 `RedisIdWorker`
+### 5.6 `RedisIdWorker`
 
 ```
 id = (nowSeconds - 2022-01-01) << 32 | INCR icr:order:yyyyMMdd
 ```
 
-- 高位时间：大致有序、可按时间趋势  
+- 高位时间：大致有序  
 - 低 32 位：当天自增，多实例共享 Redis 不撞号  
-- 订单主键 `IdType.INPUT`，用这个 id，不靠 MySQL 自增
 
 ## 6. Redis Key 速查
 
@@ -247,11 +344,12 @@ redis-cli -a '<redis-password>' --no-auth-warning SET seckill:stock:VID 0
 ## 8. 验收清单
 
 - [ ] 能说明超卖、一人一单分别在哪一层挡住（Lua vs DB）
-- [ ] 说出当前路径是 **Lua + Stream**，接口返回时订单可能尚未落库
-- [ ] 看懂 `seckill.lua` 三个返回值，以及为何必须脚本原子执行
-- [ ] 能对比同步锁版 vs Stream 版：延迟、吞吐、运维前提
-- [ ] 知道 `SimpleRedisLock` 为何用 `unlock.lua`（比对标识再删）
-- [ ] 知道 `RedisIdWorker` 如何拼出全局唯一订单 id
+- [ ] 说出当前路径是 **Lua + Stream**；Lua 是 Redis 占坑，不是 MySQL 落库完成
+- [ ] 能串：`Controller → Lua → Stream → @PostConstruct 消费者 → createVoucherOrder → Mapper → DB → XACK`
+- [ ] 知道 Stream / ACK / pending；一直失败时单线程会堵住后续落库
+- [ ] 知道 Redis/MySQL 库存短暂不同步是预期，永久漂是补偿缺失
+- [ ] 能说出 `seckillVoucherService.update` 如何经 MyBatis-Plus / `SeckillVoucherMapper` 落到表
+- [ ] 知道 `SimpleRedisLock` 为何用 `unlock.lua`；`RedisIdWorker` 如何拼订单 id
 - [ ] 演示：建消费组 → 建秒杀券 → 登录秒杀成功 → Redis 库存/Set 变化 → DB 出现订单；同用户再抢失败
 - [ ] （加分）读注释掉的 `BlockingQueue` 版，说明为何改成 Redis Stream（多实例、重启不丢队列）
 
