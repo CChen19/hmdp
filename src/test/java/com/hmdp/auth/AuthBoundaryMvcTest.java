@@ -2,13 +2,17 @@ package com.hmdp.auth;
 
 import com.hmdp.controller.ShopController;
 import com.hmdp.controller.VoucherController;
+import com.hmdp.controller.VoucherOrderController;
+import com.hmdp.dto.Result;
 import com.hmdp.dto.UserDTO;
 import com.hmdp.entity.Shop;
 import com.hmdp.entity.Voucher;
 import com.hmdp.interceptor.LoginInterceptor;
 import com.hmdp.interceptor.PrivilegeInterceptor;
 import com.hmdp.service.IShopService;
+import com.hmdp.service.IVoucherOrderService;
 import com.hmdp.service.IVoucherService;
+import com.hmdp.trade.TradeOrderService;
 import com.hmdp.utils.UserHolder;
 import com.hmdp.utils.UserRole;
 import org.junit.jupiter.api.AfterEach;
@@ -46,6 +50,10 @@ class AuthBoundaryMvcTest {
     private IShopService shopService;
     @Mock
     private IVoucherService voucherService;
+    @Mock
+    private IVoucherOrderService voucherOrderService;
+    @Mock
+    private TradeOrderService tradeOrderService;
 
     private MockMvc mockMvc;
 
@@ -55,6 +63,9 @@ class AuthBoundaryMvcTest {
         shopController.shopService = shopService;
         VoucherController voucherController = new VoucherController();
         ReflectionTestUtils.setField(voucherController, "voucherService", voucherService);
+        VoucherOrderController orderController = new VoucherOrderController();
+        ReflectionTestUtils.setField(orderController, "voucherOrderService", voucherOrderService);
+        ReflectionTestUtils.setField(orderController, "tradeOrderService", tradeOrderService);
 
         Filter testAuthFilter = new Filter() {
             @Override
@@ -77,7 +88,7 @@ class AuthBoundaryMvcTest {
             }
         };
 
-        mockMvc = MockMvcBuilders.standaloneSetup(shopController, voucherController)
+        mockMvc = MockMvcBuilders.standaloneSetup(shopController, voucherController, orderController)
                 .addFilters(testAuthFilter)
                 .addInterceptors(new LoginInterceptor(), new PrivilegeInterceptor())
                 .build();
@@ -176,5 +187,24 @@ class AuthBoundaryMvcTest {
                         .content("{\"title\":\"s\",\"stock\":1}"))
                 .andExpect(status().isOk());
         verify(voucherService).addSeckillVoucher(any(Voucher.class));
+    }
+
+    @Test
+    void userRolePostRedeem_returns403() throws Exception {
+        mockMvc.perform(post("/voucher-order/1/redeem")
+                        .param("shopId", "10")
+                        .header("X-Test-Role", UserRole.USER))
+                .andExpect(status().isForbidden());
+        verify(tradeOrderService, never()).redeemOrder(any(), any());
+    }
+
+    @Test
+    void merchantPostRedeem_ok() throws Exception {
+        when(tradeOrderService.redeemOrder(1L, 10L)).thenReturn(Result.ok());
+        mockMvc.perform(post("/voucher-order/1/redeem")
+                        .param("shopId", "10")
+                        .header("X-Test-Role", UserRole.MERCHANT))
+                .andExpect(status().isOk());
+        verify(tradeOrderService).redeemOrder(1L, 10L);
     }
 }

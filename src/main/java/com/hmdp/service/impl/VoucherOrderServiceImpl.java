@@ -255,6 +255,9 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         if (!isSuccess) {
             throw new RuntimeException("库存不足，扣减失败");
         }
+        if (voucherOrder.getStatus() == null) {
+            voucherOrder.setStatus(1); // 待支付
+        }
         this.save(voucherOrder);
     }
 }

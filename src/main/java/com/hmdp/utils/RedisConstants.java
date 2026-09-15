@@ -49,4 +49,10 @@ public class RedisConstants {
     public static final String FEED_KEY = "feed:";
     public static final String SHOP_GEO_KEY = "shop:geo:";
     public static final String USER_SIGN_KEY = "sign:";
+
+    /**
+     * SETNX marker so Redis stock INCR for a cancel outbox event runs at most once.
+     * Value = "1"; no TTL (event_key is unique forever per cancelled order).
+     */
+    public static final String STOCK_RELEASE_DONE_KEY = "outbox:stock:done:";
 }
