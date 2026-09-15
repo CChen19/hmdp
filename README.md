@@ -72,7 +72,7 @@ Layout: `src/` backend · `frontend/` static UI · `scripts/` (incl. `scripts/be
 
 ## Teaching notes (course history only)
 
-Slimmed Bilibili lesson paths — **not** current behavior. Each file has a short course outline plus 「课程当时 vs 本仓库现在」 pointing at CURRENT / SECKILL / TRADE-FLOW / SHOP-CACHE / AUTH-BOUNDARIES. Prefer those engineering docs for production.
+Historical Bilibili lesson paths with a **本仓库现在** delta table — **not** current behavior. Prefer CURRENT / SECKILL / TRADE-FLOW / SHOP-CACHE / AUTH-BOUNDARIES for production.
 
 | Phase | Doc | Topic |
 |-------|-----|--------|
