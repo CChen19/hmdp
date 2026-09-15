@@ -28,6 +28,23 @@ redis-cli SET seckill:end:{id} {endEpochSeconds}
 
 Do not treat “DB published, Redis empty” as success for buyers — purchase will fail until keys exist.
 
+### Post-deploy backfill (existing stock keys)
+
+After deploying Phase 1, vouchers that already had only `seckill:stock:{id}` will **fail-closed** until begin/end exist. Backfill from MySQL:
+
+```bash
+# dry-run first
+DRY_RUN=1 ./scripts/backfill-seckill-window.sh
+
+# write begin/end (and reset stock from DB) — see script header for SKIP_STOCK=1
+./scripts/backfill-seckill-window.sh
+
+# window-only: keep live Redis stock counters, only SET begin/end
+SKIP_STOCK=1 ./scripts/backfill-seckill-window.sh
+```
+
+Script: `scripts/backfill-seckill-window.sh` (prefixes match `RedisConstants`: `seckill:stock:` / `seckill:begin:` / `seckill:end:`).
+
 ## DB insert gate
 
 `createVoucherOrder`:
