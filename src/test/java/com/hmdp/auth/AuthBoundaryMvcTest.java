@@ -126,6 +126,17 @@ class AuthBoundaryMvcTest {
     }
 
     @Test
+    void userRolePostShopWithMatrixVar_returns403() throws Exception {
+        // Raw URI /shop;evil=1 must still hit privilege gate (not skip via equals on requestURI)
+        mockMvc.perform(post("/shop;evil=1")
+                        .header("X-Test-Role", UserRole.USER)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"x\"}"))
+                .andExpect(status().isForbidden());
+        verify(shopService, never()).save(any(Shop.class));
+    }
+
+    @Test
     void userRolePostVoucher_returns403() throws Exception {
         mockMvc.perform(post("/voucher")
                         .header("X-Test-Role", UserRole.USER)
