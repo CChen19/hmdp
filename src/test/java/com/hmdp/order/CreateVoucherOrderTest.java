@@ -4,6 +4,7 @@ import com.hmdp.dto.Result;
 import com.hmdp.dto.UserDTO;
 import com.hmdp.entity.VoucherOrder;
 import com.hmdp.mapper.VoucherOrderMapper;
+import com.hmdp.metrics.BusinessMeters;
 import com.hmdp.seckill.SeckillConsumeGate;
 import com.hmdp.seckill.SeckillDeadLetterService;
 import com.hmdp.service.ISeckillVoucherService;
@@ -50,6 +51,8 @@ class CreateVoucherOrderTest {
     private SeckillConsumeGate seckillConsumeGate;
     @Mock
     private SeckillDeadLetterService seckillDeadLetterService;
+    @Mock
+    private BusinessMeters businessMeters;
     @Mock
     private HashOperations<String, Object, Object> hashOperations;
     @Mock

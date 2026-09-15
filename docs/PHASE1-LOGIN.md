@@ -1,3 +1,5 @@
+> **Teaching evolution note** — this file tracks the course learning path. For what the running app does **now**, see [`CURRENT.md`](CURRENT.md).
+
 # Phase 1：短信登录与会话（Session → Redis Token）
 
 > 前置：Phase 0 环境已通（后端 `8081` · Redis 密码见 `application.yaml`）  

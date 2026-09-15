@@ -9,6 +9,7 @@ import com.hmdp.entity.SeckillDeadLetter;
 import com.hmdp.entity.SeckillVoucher;
 import com.hmdp.entity.VoucherOrder;
 import com.hmdp.mapper.VoucherOrderMapper;
+import com.hmdp.metrics.BusinessMeters;
 import com.hmdp.seckill.SeckillConsumeGate;
 import com.hmdp.seckill.SeckillDeadLetterService;
 import com.hmdp.service.ISeckillVoucherService;
@@ -49,6 +50,8 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     private SeckillConsumeGate seckillConsumeGate;
     @Resource
     private SeckillDeadLetterService seckillDeadLetterService;
+    @Resource
+    private BusinessMeters businessMeters;
 
     private static final DefaultRedisScript<Long> SECKILL_SCRIPT;
 
@@ -66,20 +69,21 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
      */
     @Override
     public Result seckillVoucher(Long voucherId) {
+        businessMeters.seckillRequest();
         if (!seckillConsumeGate.isReady()) {
-            return Result.fail("秒杀服务未就绪，请稍后重试");
+            return reject("秒杀服务未就绪，请稍后重试");
         }
         // Defense in depth: reject outside activity window before Lua
         SeckillVoucher voucher = seckillVoucherService.getById(voucherId);
         if (voucher == null || voucher.getBeginTime() == null || voucher.getEndTime() == null) {
-            return Result.fail("秒杀活动未开放");
+            return reject("秒杀活动未开放");
         }
         LocalDateTime now = LocalDateTime.now();
         if (now.isBefore(voucher.getBeginTime())) {
-            return Result.fail("秒杀尚未开始");
+            return reject("秒杀尚未开始");
         }
         if (now.isAfter(voucher.getEndTime())) {
-            return Result.fail("秒杀已经结束");
+            return reject("秒杀已经结束");
         }
         UserDTO user = UserHolder.getUser();
         Long orderId = redisIdWorker.nextId("order");
@@ -94,14 +98,14 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         int r = res == null ? -1 : res.intValue();
         if (r != 0) {
             if (r == 1) {
-                return Result.fail("库存不足");
+                return reject("库存不足");
             }
             if (r == 2) {
                 return resolveDuplicateOrder(voucherId, user.getId());
             }
-            return Result.fail("不在活动时间");
+            return reject("不在活动时间");
         }
-        return Result.ok(orderId);
+        return accept(orderId);
     }
 
     /**
@@ -111,16 +115,26 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         Object mapped = stringRedisTemplate.opsForHash().get(
                 RedisConstants.SECKILL_ORDER_ID_MAP_KEY + voucherId, userId.toString());
         if (mapped != null) {
-            return Result.ok(Long.valueOf(String.valueOf(mapped)));
+            return accept(Long.valueOf(String.valueOf(mapped)));
         }
         VoucherOrder existing = lambdaQuery()
                 .eq(VoucherOrder::getVoucherId, voucherId)
                 .eq(VoucherOrder::getUserId, userId)
                 .one();
         if (existing != null) {
-            return Result.ok(existing.getId());
+            return accept(existing.getId());
         }
-        return Result.fail("禁止重复下单");
+        return reject("禁止重复下单");
+    }
+
+    private Result accept(Long orderId) {
+        businessMeters.seckillAccept(orderId);
+        return Result.ok(orderId);
+    }
+
+    private Result reject(String msg) {
+        businessMeters.seckillReject();
+        return Result.fail(msg);
     }
 
     @Override
@@ -259,5 +273,6 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             voucherOrder.setStatus(1); // 待支付
         }
         this.save(voucherOrder);
+        businessMeters.seckillFinalSuccess(voucherOrder.getId());
     }
 }

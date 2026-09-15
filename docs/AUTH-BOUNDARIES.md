@@ -4,9 +4,12 @@
 
 | Class | Who | Examples |
 |-------|-----|----------|
-| Public | Anonymous OK | `POST /user/code`, `POST /user/login`, `GET /blog/hot`, `GET /shop-type/**`, `GET /shop/**`, `GET /voucher/list/**` |
+| Public | Anonymous OK | `POST /user/code`, `POST /user/login`, `GET /blog/hot`, `GET /shop-type/**`, `GET /shop/**`, `GET /voucher/list/**`, `GET /actuator/health`, `GET /actuator/info`, `GET /actuator/metrics/**`, `GET /actuator/prometheus` |
 | Login required | Any authenticated user | upload, logout, me, sign, blog write/like, follow, seckill order, other writes |
-| Privileged write | `MERCHANT` or `ADMIN` | `POST/PUT /shop`, `POST /voucher`, `POST /voucher/seckill` |
+| Privileged write | `MERCHANT` or `ADMIN` | `POST/PUT /shop`, `POST /voucher`, `POST /voucher/seckill`, `POST /voucher-order/{id}/redeem` |
+| Admin only | `ADMIN` | `GET /ops/snapshot` |
+
+Actuator metrics/prometheus are treated as **local-only** (same port 8081 — do not publish publicly). See [`CURRENT.md`](CURRENT.md).
 
 Responses: **401** if anonymous on a protected path; **403** if logged in but not privileged.
 

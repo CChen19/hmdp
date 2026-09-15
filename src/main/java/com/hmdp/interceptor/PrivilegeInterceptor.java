@@ -23,7 +23,7 @@ public class PrivilegeInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
-        if (!isPrivilegedWrite(request)) {
+        if (!isPrivilegedWrite(request) && !isAdminOnly(request)) {
             return true;
         }
         UserDTO user = UserHolder.getUser();
@@ -31,7 +31,15 @@ public class PrivilegeInterceptor implements HandlerInterceptor {
             response.setStatus(401);
             return false;
         }
-        if (!UserRole.isPrivileged(UserRole.normalize(user.getRole()))) {
+        String role = UserRole.normalize(user.getRole());
+        if (isAdminOnly(request)) {
+            if (!UserRole.ADMIN.equals(role)) {
+                response.setStatus(403);
+                return false;
+            }
+            return true;
+        }
+        if (!UserRole.isPrivileged(role)) {
             response.setStatus(403);
             return false;
         }
@@ -51,6 +59,14 @@ public class PrivilegeInterceptor implements HandlerInterceptor {
             return "/shop".equals(path);
         }
         return false;
+    }
+
+    /** Ops snapshot: ADMIN only (not MERCHANT). */
+    static boolean isAdminOnly(HttpServletRequest request) {
+        if (!"GET".equalsIgnoreCase(request.getMethod())) {
+            return false;
+        }
+        return "/ops/snapshot".equals(resolveMappedPath(request));
     }
 
     /**

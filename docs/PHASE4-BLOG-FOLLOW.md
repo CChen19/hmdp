@@ -1,3 +1,5 @@
+> **Teaching evolution note** — this file tracks the course learning path. For what the running app does **now**, see [`CURRENT.md`](CURRENT.md).
+
 # Phase 4：探店与关注（点赞 ZSet / 关注 Set / Feed 推模式）
 
 > 前置：Phase 0 环境通 · Phase 1 登录懂 Token（点赞 / 关注 / 发笔记 / Feed 都要登录）  
