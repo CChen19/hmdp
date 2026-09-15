@@ -15,8 +15,14 @@ local now = tonumber(ARGV[4])
 
 --库存key
 local stockKey = 'seckill:stock:' .. voucherId
---订单key
+--订单key（已下单用户集合）
 local orderKey = 'seckill:order:' .. voucherId
+-- userId -> orderId（重复下单时返回原订单号）
+local orderIdMapKey = 'seckill:order:id:' .. voucherId
+-- 用户侧 processing 集合（mine 列表可合并）
+local processingKey = 'seckill:processing:' .. userId
+-- 按订单 id 查 owner（结果查询 PROCESSING）
+local acceptKey = 'seckill:accept:' .. id
 --活动时间窗（epoch seconds）
 local beginKey = 'seckill:begin:' .. voucherId
 local endKey = 'seckill:end:' .. voucherId
@@ -41,15 +47,19 @@ if (stock == nil or stock <= 0) then
 end
 
 --判断用户是否下单
---存在用户 禁止重复下单
+--存在用户 禁止重复下单（Java 侧 HGET orderIdMap 返回原 orderId）
 if (tonumber(redis.call('sismember', orderKey, userId)) == 1) then
     return 2
 end
 
 --扣减库存
 redis.call('incrby', stockKey, -1)
---下单（保存用户）
+--下单（保存用户 + 原订单号映射）
 redis.call('sadd', orderKey, userId)
+redis.call('hset', orderIdMapKey, userId, id)
+redis.call('sadd', processingKey, id)
+-- accept 记录 TTL 24h：Redis 宕机于 MySQL 落库前仍可能丢（见 docs）
+redis.call('setex', acceptKey, 86400, userId)
 --发送消息
 redis.call('xadd', 'stream.orders', '*', 'userId', userId, 'voucherId', voucherId, 'id', id)
 return 0

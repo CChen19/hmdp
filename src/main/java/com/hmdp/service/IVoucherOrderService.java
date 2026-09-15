@@ -27,6 +27,16 @@ public interface IVoucherOrderService extends IService<VoucherOrder> {
     Result seckillVoucher(Long voucherId);
 
     /**
+     * Owner-only order result: PROCESSING / SUCCESS / FAILED.
+     */
+    Result queryOrderById(Long orderId);
+
+    /**
+     * Current user's orders (DB + Redis processing + dead-letter fails).
+     */
+    Result listMyOrders();
+
+    /**
      * 得到结果
      *
      * @param voucherId 券id
