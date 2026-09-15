@@ -10,15 +10,33 @@ local voucherId = ARGV[1]
 local userId = ARGV[2]
 --订单id
 local id = ARGV[3]
+--服务器当前时间（epoch seconds）
+local now = tonumber(ARGV[4])
 
 --库存key
 local stockKey = 'seckill:stock:' .. voucherId
 --订单key
 local orderKey = 'seckill:order:' .. voucherId
+--活动时间窗（epoch seconds）
+local beginKey = 'seckill:begin:' .. voucherId
+local endKey = 'seckill:end:' .. voucherId
+
+--活动时间元数据缺失则拒绝（不开放购买）
+local beginTime = tonumber(redis.call('get', beginKey))
+local endTime = tonumber(redis.call('get', endKey))
+if (beginTime == nil or endTime == nil) then
+    return 3
+end
+
+--不在 [begin, end] 内
+if (now < beginTime or now > endTime) then
+    return 3
+end
 
 --库存是否充足
---库存不足
-if (tonumber(redis.call('get', stockKey)) <= 0) then
+--库存不足（含 stock key 缺失）
+local stock = tonumber(redis.call('get', stockKey))
+if (stock == nil or stock <= 0) then
     return 1
 end
 
@@ -29,10 +47,9 @@ if (tonumber(redis.call('sismember', orderKey, userId)) == 1) then
 end
 
 --扣减库存
-redis.call('incrby',stockKey,-1)
+redis.call('incrby', stockKey, -1)
 --下单（保存用户）
-redis.call('sadd',orderKey,userId)
+redis.call('sadd', orderKey, userId)
 --发送消息
-redis.call('xadd','stream.orders','*','userId',userId,'voucherId',voucherId,'id',id)
+redis.call('xadd', 'stream.orders', '*', 'userId', userId, 'voucherId', voucherId, 'id', id)
 return 0
-
