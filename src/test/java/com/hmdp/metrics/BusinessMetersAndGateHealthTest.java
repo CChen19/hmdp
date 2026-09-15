@@ -29,6 +29,32 @@ class BusinessMetersAndGateHealthTest {
         assertEquals(1.0, registry.get(BusinessMeters.SECKILL_REJECT).counter().count());
         assertEquals(1.0, registry.get(BusinessMeters.SECKILL_FINAL_SUCCESS).counter().count());
         assertTrue(registry.get(BusinessMeters.SECKILL_ACCEPT_TO_DB).timer().count() >= 1);
+        assertEquals(0, meters.acceptLagMapSize());
+    }
+
+    @Test
+    void acceptLagMap_duplicateKnownDoesNotGrow_andCapDoesNotThrow() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        BusinessMeters meters = new BusinessMeters(registry);
+
+        meters.seckillAccept(100L);
+        assertEquals(1, meters.acceptLagMapSize());
+        meters.seckillFinalSuccess(100L);
+        assertEquals(0, meters.acceptLagMapSize());
+        assertTrue(registry.get(BusinessMeters.SECKILL_ACCEPT_TO_DB).timer().count() >= 1);
+
+        meters.seckillAccept(200L);
+        assertEquals(1, meters.acceptLagMapSize());
+        meters.seckillAcceptExisting(200L);
+        meters.seckillAccept(200L, false);
+        assertEquals(1, meters.acceptLagMapSize());
+        // first-accept(100) + first-accept(200) + existing + false-track = 4 accepts
+        assertEquals(4.0, registry.get(BusinessMeters.SECKILL_ACCEPT).counter().count());
+
+        for (long i = 0; i < BusinessMeters.ACCEPT_NANOS_CAP + 50; i++) {
+            meters.seckillAccept(1000L + i);
+        }
+        assertTrue(meters.acceptLagMapSize() <= BusinessMeters.ACCEPT_NANOS_CAP);
     }
 
     @Test

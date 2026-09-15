@@ -53,7 +53,7 @@ Empty-stock rejects should show high `http_rejects` and **near-zero** new `final
 
 ## Sync comparison
 
-No second production seckill path. Compare **accept latency/QPS** vs **accept-to-DB** timer / MySQL counts on this async path only ([`DESIGN-NOTES.md`](DESIGN-NOTES.md)).
+No second production seckill path. Compare **accept latency/QPS** vs **accept-to-DB** timer / MySQL counts on this async path only ([`CURRENT.md`](CURRENT.md) — Why this stack).
 
 ## Smoke numbers (agent environment)
 

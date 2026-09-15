@@ -118,7 +118,7 @@ POST /voucher/seckill
 XGROUP CREATE stream.orders g1 0-0 MKSTREAM
 ```
 
-（应用启动也会幂等创建；**不要用 `$`**，否则会跳过已有历史。详情见 [`SECKILL-CONSUME.md`](SECKILL-CONSUME.md)。）
+（应用启动也会幂等创建；**不要用 `$`**，否则会跳过已有历史。详情见 [`SECKILL.md`](SECKILL.md)。）
 
 对比注释里的同步 Redisson 版：
 
@@ -284,7 +284,7 @@ NOGROUP No such key 'stream.orders' or consumer group 'g1'
 redis-cli -a '<redis-password>' --no-auth-warning XGROUP CREATE stream.orders g1 0-0 MKSTREAM
 ```
 
-（勿用 `$`。若组已用 `$` 建过：`XGROUP SETID stream.orders g1 0-0`。见 [`SECKILL-CONSUME.md`](SECKILL-CONSUME.md)。）
+（勿用 `$`。若组已用 `$` 建过：`XGROUP SETID stream.orders g1 0-0`。见 [`SECKILL.md`](SECKILL.md)。）
 
 再启动后端（或重启）。
 

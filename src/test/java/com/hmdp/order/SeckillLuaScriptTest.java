@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Static checks on seckill.lua without talking to Redis.
- * For a live redis-cli smoke check, see docs/SECKILL-RULES.md.
+ * For a live redis-cli smoke check, see docs/SECKILL.md.
  */
 class SeckillLuaScriptTest {
 
