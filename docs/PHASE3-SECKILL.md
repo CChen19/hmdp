@@ -1,3 +1,5 @@
+> **Teaching evolution note** — this file tracks the course learning path. For what the running app does **now**, see [`CURRENT.md`](CURRENT.md).
+
 # Phase 3：优惠券秒杀（一人一单 / 锁 / Lua / Stream）
 
 > 前置：Phase 0 环境通 · Phase 1 登录懂 Token（秒杀接口要登录）  

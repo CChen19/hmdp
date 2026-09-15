@@ -42,7 +42,18 @@ public class LoginInterceptor implements HandlerInterceptor {
             if (uri.startsWith("/shop")) {
                 return true;
             }
-            return uri.startsWith("/voucher/list");
+            if (uri.startsWith("/voucher/list")) {
+                return true;
+            }
+            // Local ops: health/info public; metrics/prometheus for bench scrapes without login.
+            // Still same app port — do not publish 8081 publicly. See docs/CURRENT.md.
+            if (uri.equals("/actuator/health")
+                    || uri.equals("/actuator/info")
+                    || uri.equals("/actuator/prometheus")
+                    || uri.startsWith("/actuator/metrics")) {
+                return true;
+            }
+            return false;
         }
         return false;
     }

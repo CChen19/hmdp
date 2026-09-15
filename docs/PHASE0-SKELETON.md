@@ -1,3 +1,5 @@
+> **Teaching evolution note** — this file tracks the course learning path. For what the running app does **now**, see [`CURRENT.md`](CURRENT.md).
+
 # Phase 0：环境与工程骨架
 
 > 环境：后端 `8081` · 前端 nginx `8080` · MySQL 库 `hmdp` · Redis（密码见 `application.yaml`）  

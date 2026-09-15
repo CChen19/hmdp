@@ -1,3 +1,5 @@
+> **Teaching evolution note** — this file tracks the course learning path. For what the running app does **now**, see [`CURRENT.md`](CURRENT.md).
+
 # Phase 5：附近商户 GEO + 签到 Bitmap（收官）
 
 > 前置：Phase 0–4；本阶段两条线可并行学，互不依赖  

@@ -6,6 +6,7 @@ import cn.hutool.core.util.BooleanUtil;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.toolkit.StringUtils;
+import com.hmdp.metrics.BusinessMeters;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ClassPathResource;
@@ -35,6 +36,8 @@ public class CacheClient {
     static final String EMPTY_MARKER = "";
 
     private final StringRedisTemplate stringRedisTemplate;
+    /** Optional: absent in pure unit tests that construct CacheClient manually. */
+    private BusinessMeters businessMeters;
 
     private static final DefaultRedisScript<Long> UNLOCK_SCRIPT;
 
@@ -65,6 +68,11 @@ public class CacheClient {
     @Autowired
     public CacheClient(StringRedisTemplate stringRedisTemplate) {
         this.stringRedisTemplate = stringRedisTemplate;
+    }
+
+    @Autowired(required = false)
+    public void setBusinessMeters(BusinessMeters businessMeters) {
+        this.businessMeters = businessMeters;
     }
 
     /**
@@ -132,9 +140,11 @@ public class CacheClient {
         }
 
         if (json == null) {
+            recordMiss();
             return loadOnMiss(key, id, type, dbFallback, time, unit);
         }
         if (EMPTY_MARKER.equals(json)) {
+            recordMiss();
             return CacheResult.notFound();
         }
         return handleHit(key, id, json, type, dbFallback, time, unit);
@@ -156,6 +166,7 @@ public class CacheClient {
         R r = BeanUtil.toBean(jsonObject, type);
         LocalDateTime expireTime = redisData.getExpireTime();
         if (expireTime != null && expireTime.isAfter(LocalDateTime.now())) {
+            recordHit();
             return CacheResult.ok(r);
         }
         // logically expired: return stale, rebuild async under owner lock
@@ -169,6 +180,7 @@ public class CacheClient {
                 releaseLock(lockKey, token);
             }
         }
+        recordHit();
         return CacheResult.ok(r);
     }
 
@@ -222,14 +234,17 @@ public class CacheClient {
                 RedisData redisData = JSONUtil.toBean(json, RedisData.class);
                 if (redisData != null && redisData.getData() != null) {
                     JSONObject jsonObject = (JSONObject) redisData.getData();
+                    recordHit();
                     return CacheResult.ok(BeanUtil.toBean(jsonObject, type));
                 }
             }
             R r;
             try {
                 r = dbFallback.apply(id);
+                recordOrigin();
             } catch (RuntimeException e) {
                 log.error("DB load failed for id={}, not caching as empty", id, e);
+                recordUnavailable();
                 return CacheResult.unavailable();
             }
             if (r == null) {
@@ -274,13 +289,39 @@ public class CacheClient {
     private <R, ID> CacheResult<R> loadFromDbOnly(ID id, Function<ID, R> dbFallback) {
         try {
             R r = dbFallback.apply(id);
+            recordOrigin();
             if (r == null) {
                 return CacheResult.notFound();
             }
             return CacheResult.ok(r);
         } catch (RuntimeException e) {
             log.error("DB fallback failed for id={}", id, e);
+            recordUnavailable();
             return CacheResult.unavailable();
+        }
+    }
+
+    private void recordHit() {
+        if (businessMeters != null) {
+            businessMeters.shopHit();
+        }
+    }
+
+    private void recordMiss() {
+        if (businessMeters != null) {
+            businessMeters.shopMiss();
+        }
+    }
+
+    private void recordOrigin() {
+        if (businessMeters != null) {
+            businessMeters.shopOrigin();
+        }
+    }
+
+    private void recordUnavailable() {
+        if (businessMeters != null) {
+            businessMeters.shopUnavailable();
         }
     }
 
