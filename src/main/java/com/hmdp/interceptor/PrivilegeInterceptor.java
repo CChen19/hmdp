@@ -44,7 +44,8 @@ public class PrivilegeInterceptor implements HandlerInterceptor {
         if ("POST".equalsIgnoreCase(method)) {
             return "/shop".equals(path)
                     || "/voucher".equals(path)
-                    || "/voucher/seckill".equals(path);
+                    || "/voucher/seckill".equals(path)
+                    || "/voucher-order/{id}/redeem".equals(path);
         }
         if ("PUT".equalsIgnoreCase(method)) {
             return "/shop".equals(path);
