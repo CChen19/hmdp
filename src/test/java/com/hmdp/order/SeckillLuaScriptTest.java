@@ -26,5 +26,8 @@ class SeckillLuaScriptTest {
         assertTrue(lua.contains("return 3"), "reject outside window / missing meta");
         assertTrue(lua.contains("now < beginTime") || lua.contains("now < beginTime or now > endTime"),
                 "inclusive window check");
+        assertTrue(lua.contains("seckill:order:id:"), "order id map for retry");
+        assertTrue(lua.contains("hset"), "stores userId->orderId");
+        assertTrue(lua.contains("seckill:accept:"), "accept key for PROCESSING query");
     }
 }

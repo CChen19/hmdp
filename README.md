@@ -55,11 +55,13 @@ mvn -DskipTests package && ./scripts/start-backend.sh
 ./scripts/start-frontend.sh
 ```
 
-打开 http://127.0.0.1:8080/ 。登录验证码在后端日志：`发送验证码成功，验证码：xxxxxx`。秒杀启动若报 `NOGROUP ... stream.orders`，在 Redis 执行：
+打开 http://127.0.0.1:8080/ 。登录验证码在后端日志：`发送验证码成功，验证码：xxxxxx`。秒杀消费组由应用启动时创建（`0-0`，见 [`docs/SECKILL-CONSUME.md`](docs/SECKILL-CONSUME.md)）。若仍报 `NOGROUP`，在 Redis 执行：
 
 ```text
-XGROUP CREATE stream.orders g1 $ MKSTREAM
+XGROUP CREATE stream.orders g1 0-0 MKSTREAM
 ```
+
+**Do not** create the group with `$` — that skips existing stream history. If an old `$` group already exists: `XGROUP SETID stream.orders g1 0-0`.
 
 停止：`lsof -iTCP:8081 -sTCP:LISTEN` 后 `kill <pid>`；nginx 用 `nginx -s stop -p "$(pwd)" -c "$(pwd)/scripts/nginx-hmdp.conf`。
 
