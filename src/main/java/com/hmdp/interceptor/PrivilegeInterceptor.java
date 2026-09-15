@@ -1,48 +1,46 @@
 package com.hmdp.interceptor;
 
+import com.hmdp.dto.UserDTO;
 import com.hmdp.utils.UserHolder;
+import com.hmdp.utils.UserRole;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
 /**
- * Requires login except for known public endpoints (by method + path).
+ * Privileged writes (shop create/update, voucher create) require MERCHANT or ADMIN.
+ * Anonymous callers already get 401 from {@link LoginInterceptor}.
  */
-public class LoginInterceptor implements HandlerInterceptor {
+public class PrivilegeInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
-        if (isPublic(request)) {
+        if (!isPrivilegedWrite(request)) {
             return true;
         }
-        if (UserHolder.getUser() == null) {
+        UserDTO user = UserHolder.getUser();
+        if (user == null) {
             response.setStatus(401);
+            return false;
+        }
+        if (!UserRole.isPrivileged(UserRole.normalize(user.getRole()))) {
+            response.setStatus(403);
             return false;
         }
         return true;
     }
 
-    /**
-     * Public: user code/login, blog hot, shop-type, shop GET, voucher list GET.
-     */
-    static boolean isPublic(HttpServletRequest request) {
+    static boolean isPrivilegedWrite(HttpServletRequest request) {
         String method = request.getMethod();
         String uri = normalizeUri(request);
         if ("POST".equalsIgnoreCase(method)) {
-            return "/user/code".equals(uri) || "/user/login".equals(uri);
+            return "/shop".equals(uri)
+                    || "/voucher".equals(uri)
+                    || "/voucher/seckill".equals(uri);
         }
-        if ("GET".equalsIgnoreCase(method)) {
-            if ("/blog/hot".equals(uri)) {
-                return true;
-            }
-            if (uri.startsWith("/shop-type")) {
-                return true;
-            }
-            if (uri.startsWith("/shop")) {
-                return true;
-            }
-            return uri.startsWith("/voucher/list");
+        if ("PUT".equalsIgnoreCase(method)) {
+            return "/shop".equals(uri);
         }
         return false;
     }

@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.toolkit.StringUtils;
 import com.hmdp.dto.UserDTO;
 import com.hmdp.utils.RedisConstants;
 import com.hmdp.utils.UserHolder;
+import com.hmdp.utils.UserRole;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.web.servlet.HandlerInterceptor;
 
@@ -43,7 +44,9 @@ public class RefreshTokenInterceptor implements HandlerInterceptor {
             return true;
         }
         //hash转UserDTO存入ThreadLocal
-        UserHolder.saveUser(BeanUtil.fillBeanWithMap(userMap, new UserDTO(), false));
+        UserDTO userDTO = BeanUtil.fillBeanWithMap(userMap, new UserDTO(), false);
+        userDTO.setRole(UserRole.normalize(userDTO.getRole()));
+        UserHolder.saveUser(userDTO);
         //token续命
         stringRedisTemplate.expire(RedisConstants.LOGIN_USER_KEY + token, RedisConstants.LOGIN_USER_TTL, TimeUnit.MINUTES);
         return true;
