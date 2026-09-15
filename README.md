@@ -70,9 +70,9 @@ Default `mvn test` is safe (no million-key Redis warmup / mass user inserts). De
 
 Layout: `src/` backend · `frontend/` static UI · `scripts/` (incl. `scripts/bench/`) · `docker-compose.yml`.
 
-## Teaching notes (course evolution)
+## Teaching notes (course history only)
 
-These may lag the code. Prefer CURRENT / SECKILL / TRADE-FLOW for production behavior.
+Slimmed Bilibili lesson paths — **not** current behavior. Each file has a short course outline plus 「课程当时 vs 本仓库现在」 pointing at CURRENT / SECKILL / TRADE-FLOW / SHOP-CACHE / AUTH-BOUNDARIES. Prefer those engineering docs for production.
 
 | Phase | Doc | Topic |
 |-------|-----|--------|
@@ -80,8 +80,8 @@ These may lag the code. Prefer CURRENT / SECKILL / TRADE-FLOW for production beh
 | 1 | [`docs/PHASE1-LOGIN.md`](docs/PHASE1-LOGIN.md) | SMS login & Redis session |
 | 2 | [`docs/PHASE2-CACHE.md`](docs/PHASE2-CACHE.md) | Shop cache (穿透 / 击穿 / 雪崩) |
 | 3 | [`docs/PHASE3-SECKILL.md`](docs/PHASE3-SECKILL.md) | Coupon seckill (lock / Lua / Stream) |
-| 4 | [`docs/PHASE4-BLOG-FOLLOW.md`](docs/PHASE4-BLOG-FOLLOW.md) | Blog / follow / feed (course Phase 4) |
-| 5 | [`docs/PHASE5-GEO-SIGN.md`](docs/PHASE5-GEO-SIGN.md) | GEO & sign-in bitmap |
+| 4 | [`docs/PHASE4-BLOG-FOLLOW.md`](docs/PHASE4-BLOG-FOLLOW.md) | Blog / follow / feed (course Phase 4 — not evidence/bench) |
+| 5 | [`docs/PHASE5-GEO-SIGN.md`](docs/PHASE5-GEO-SIGN.md) | GEO & sign-in bitmap (background) |
 
 ## Bench
 

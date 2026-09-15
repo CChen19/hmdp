@@ -73,9 +73,9 @@ See [`BENCH.md`](BENCH.md).
 
 ## Teaching notes (historical evolution)
 
-`docs/PHASE0-SKELETON.md` … `docs/PHASE5-GEO-SIGN.md` are **course evolution notes**. They may lag the code. Prefer this file + [`TRADE-FLOW.md`](TRADE-FLOW.md) / [`SECKILL.md`](SECKILL.md) / [`SHOP-CACHE.md`](SHOP-CACHE.md) for current behavior.
+`docs/PHASE0-SKELETON.md` … `docs/PHASE5-GEO-SIGN.md` are **slim course-history notes** (what the lesson taught + a short 「课程当时 vs 本仓库现在」 table). They are **not** a second source of truth. Prefer this file + [`TRADE-FLOW.md`](TRADE-FLOW.md) / [`SECKILL.md`](SECKILL.md) / [`SHOP-CACHE.md`](SHOP-CACHE.md) / [`AUTH-BOUNDARIES.md`](AUTH-BOUNDARIES.md).
 
-Course “Phase 4” in [`PHASE4-BLOG-FOLLOW.md`](PHASE4-BLOG-FOLLOW.md) is **blog / follow / feed**, not this engineering evidence phase.
+Course “Phase 4” in [`PHASE4-BLOG-FOLLOW.md`](PHASE4-BLOG-FOLLOW.md) is **blog / follow / feed**, not the engineering evidence / bench phase.
 
 ## Out of scope (intentionally)
 
