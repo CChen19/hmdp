@@ -47,6 +47,9 @@ public class BusinessMeters {
     private final AtomicLong outboxPending = new AtomicLong(0L);
     private final AtomicLong gateReady = new AtomicLong(0L);
 
+    /** Soft cap so poison / never-consumed accepts cannot grow the map without bound. */
+    static final int ACCEPT_NANOS_CAP = 4096;
+
     /** orderId → accept nanoTime for accept-to-DB lag (best-effort, same JVM). */
     private final ConcurrentHashMap<Long, Long> acceptNanos = new ConcurrentHashMap<Long, Long>();
 
@@ -97,9 +100,43 @@ public class BusinessMeters {
         seckillRequest.increment();
     }
 
+    /**
+     * First-time Lua accept (new order id): increment counter and start accept→DB lag tracking.
+     */
     public void seckillAccept(Long orderId) {
+        seckillAccept(orderId, true);
+    }
+
+    /**
+     * Idempotent duplicate that returns an already-known order id: count accept, do not re-put lag.
+     */
+    public void seckillAcceptExisting(Long orderId) {
+        seckillAccept(orderId, false);
+    }
+
+    /**
+     * @param trackLag true only for a newly minted order id; false for duplicate-known id
+     */
+    public void seckillAccept(Long orderId, boolean trackLag) {
         seckillAccept.increment();
-        if (orderId != null) {
+        if (trackLag) {
+            trackAcceptLag(orderId);
+        }
+    }
+
+    private void trackAcceptLag(Long orderId) {
+        if (orderId == null) {
+            return;
+        }
+        if (acceptNanos.size() >= ACCEPT_NANOS_CAP) {
+            // Drop an arbitrary entry so the map cannot grow without bound under poison / never-consumed.
+            java.util.Iterator<Long> it = acceptNanos.keySet().iterator();
+            if (it.hasNext()) {
+                it.next();
+                it.remove();
+            }
+        }
+        if (acceptNanos.size() < ACCEPT_NANOS_CAP) {
             acceptNanos.put(orderId, System.nanoTime());
         }
     }
@@ -120,6 +157,11 @@ public class BusinessMeters {
         if (start != null) {
             acceptToDb.record(System.nanoTime() - start, TimeUnit.NANOSECONDS);
         }
+    }
+
+    /** Package-visible for tests: size of the accept→DB lag map. */
+    int acceptLagMapSize() {
+        return acceptNanos.size();
     }
 
     public void shopHit() {

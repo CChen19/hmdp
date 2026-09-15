@@ -78,7 +78,7 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
 
     /**
      * Writes seckill:stock / seckill:begin / seckill:end. On failure after commit,
-     * DB is published but Redis is empty — rebuild manually (see docs/SECKILL-RULES.md).
+     * DB is published but Redis is empty — rebuild manually (see docs/SECKILL.md).
      */
     private void publishSeckillToRedis(Long voucherId, String stock, String beginEpoch, String endEpoch) {
         try {

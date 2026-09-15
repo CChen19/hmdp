@@ -110,25 +110,31 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
     /**
      * Retry of same user+voucher: return original order id (Redis map or DB), not only「禁止重复下单」.
+     * Does not re-track accept→DB lag for an already-known order id.
      */
     private Result resolveDuplicateOrder(Long voucherId, Long userId) {
         Object mapped = stringRedisTemplate.opsForHash().get(
                 RedisConstants.SECKILL_ORDER_ID_MAP_KEY + voucherId, userId.toString());
         if (mapped != null) {
-            return accept(Long.valueOf(String.valueOf(mapped)));
+            return acceptExisting(Long.valueOf(String.valueOf(mapped)));
         }
         VoucherOrder existing = lambdaQuery()
                 .eq(VoucherOrder::getVoucherId, voucherId)
                 .eq(VoucherOrder::getUserId, userId)
                 .one();
         if (existing != null) {
-            return accept(existing.getId());
+            return acceptExisting(existing.getId());
         }
         return reject("禁止重复下单");
     }
 
     private Result accept(Long orderId) {
         businessMeters.seckillAccept(orderId);
+        return Result.ok(orderId);
+    }
+
+    private Result acceptExisting(Long orderId) {
+        businessMeters.seckillAcceptExisting(orderId);
         return Result.ok(orderId);
     }
 
