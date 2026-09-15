@@ -37,6 +37,10 @@ public class SeckillOrderStreamConsumer implements SmartLifecycle {
     private static final Duration READ_BLOCK = Duration.ofSeconds(2);
     private static final long CLAIM_SCAN_INTERVAL_MS = 15_000L;
     private static final int CLAIM_BATCH = 10;
+    /** XPENDING window when hunting idle ids owned by other consumers (skip own PEL noise). */
+    private static final int CLAIM_SCAN_WINDOW = 100;
+    /** Max own-pending entries touched per recover scan (each at most once). */
+    private static final int OWN_PENDING_SCAN_LIMIT = 50;
 
     @Resource
     private StringRedisTemplate stringRedisTemplate;
@@ -151,7 +155,9 @@ public class SeckillOrderStreamConsumer implements SmartLifecycle {
                 if (list == null || list.isEmpty()) {
                     continue;
                 }
-                processRecord(list.get(0), 1L);
+                MapRecord<String, Object, Object> record = list.get(0);
+                // Fresh > read already bumped PEL delivery once; use PEL count if available.
+                processRecord(record, lookupDeliveryCount(record.getId()));
             } catch (Exception e) {
                 if (!running.get() || Thread.currentThread().isInterrupted()) {
                     break;
@@ -167,22 +173,37 @@ public class SeckillOrderStreamConsumer implements SmartLifecycle {
         }
     }
 
-    private void recoverOwnPending() {
+    /**
+     * Process this consumer's PEL entries <strong>at most once per scan</strong>.
+     * Uses XPENDING + XRANGE (does <em>not</em> {@code XREADGROUP} id {@code 0}), so RETRY
+     * cannot tight-loop and burn {@link SeckillStreamMessageHandler#MAX_DELIVERIES} into poison+ACK.
+     * Delivery-count poison therefore reflects real {@code >} / claim redeliveries across scans.
+     */
+    /** Package/test API: recover own PEL once per scan without XREADGROUP 0. */
+    public void recoverOwnPending() {
         String key = RedisConstants.SECKILL_STREAM_KEY;
         String group = RedisConstants.SECKILL_STREAM_GROUP;
         try {
-            while (running.get()) {
-                List<MapRecord<String, Object, Object>> list = stringRedisTemplate.opsForStream().read(
-                        Consumer.from(group, consumerName),
-                        StreamReadOptions.empty().count(1),
-                        StreamOffset.create(key, ReadOffset.from("0"))
-                );
-                if (list == null || list.isEmpty()) {
+            PendingMessages pending = stringRedisTemplate.opsForStream().pending(
+                    key,
+                    Consumer.from(group, consumerName),
+                    Range.unbounded(),
+                    (long) OWN_PENDING_SCAN_LIMIT);
+            if (pending == null || pending.isEmpty()) {
+                return;
+            }
+            for (PendingMessage pm : pending) {
+                if (!running.get()) {
                     break;
                 }
-                MapRecord<String, Object, Object> record = list.get(0);
-                long deliveries = lookupDeliveryCount(record.getId());
-                processRecord(record, deliveries);
+                MapRecord<String, Object, Object> record = loadRecordBody(pm.getId());
+                if (record == null) {
+                    log.warn("own pending id {} has no stream body; skip this scan", pm.getId());
+                    continue;
+                }
+                // Existing PEL count only — do not re-deliver via XREADGROUP 0.
+                processRecord(record, pm.getTotalDeliveryCount());
+                // RETRY: leave pending; next periodic scan (~15s) may try again without a burst.
             }
         } catch (Exception e) {
             log.warn("recoverOwnPending failed: {}", e.getMessage());
@@ -192,18 +213,23 @@ public class SeckillOrderStreamConsumer implements SmartLifecycle {
     /**
      * XPENDING + XCLAIM idle messages from dead consumers (XAUTOCLAIM equivalent on SDR 2.7).
      * Min-idle: {@link RedisConstants#SECKILL_CLAIM_MIN_IDLE_MS} (30s).
+     * Scans a window larger than {@link #CLAIM_BATCH} so this consumer's own PEL entries
+     * do not hide idle ids from other consumers.
      */
     private void claimIdleFromOthers() {
         String key = RedisConstants.SECKILL_STREAM_KEY;
         String group = RedisConstants.SECKILL_STREAM_GROUP;
         try {
             PendingMessages pending = stringRedisTemplate.opsForStream().pending(
-                    key, group, Range.unbounded(), (long) CLAIM_BATCH);
+                    key, group, Range.unbounded(), (long) CLAIM_SCAN_WINDOW);
             if (pending == null || pending.isEmpty()) {
                 return;
             }
             List<RecordId> toClaim = new ArrayList<RecordId>();
             for (PendingMessage pm : pending) {
+                if (toClaim.size() >= CLAIM_BATCH) {
+                    break;
+                }
                 if (consumerName.equals(pm.getConsumerName())) {
                     continue;
                 }
@@ -224,6 +250,22 @@ public class SeckillOrderStreamConsumer implements SmartLifecycle {
         } catch (Exception e) {
             log.warn("claimIdleFromOthers failed: {}", e.getMessage());
         }
+    }
+
+    /**
+     * Load stream entry body without touching the PEL / delivery counter.
+     */
+    private MapRecord<String, Object, Object> loadRecordBody(RecordId id) {
+        if (id == null) {
+            return null;
+        }
+        String key = RedisConstants.SECKILL_STREAM_KEY;
+        List<MapRecord<String, Object, Object>> range =
+                stringRedisTemplate.opsForStream().range(key, Range.just(id.getValue()));
+        if (range == null || range.isEmpty()) {
+            return null;
+        }
+        return range.get(0);
     }
 
     private List<MapRecord<String, Object, Object>> claimRecords(List<RecordId> ids) {
@@ -283,7 +325,7 @@ public class SeckillOrderStreamConsumer implements SmartLifecycle {
         return 1L;
     }
 
-    private void processRecord(MapRecord<String, Object, Object> record, long deliveryCount) {
+    ConsumeOutcome processRecord(MapRecord<String, Object, Object> record, long deliveryCount) {
         ConsumeOutcome outcome = messageHandler.handle(record, deliveryCount);
         if (outcome == ConsumeOutcome.SUCCESS || outcome == ConsumeOutcome.POISON) {
             stringRedisTemplate.opsForStream().acknowledge(
@@ -291,7 +333,8 @@ public class SeckillOrderStreamConsumer implements SmartLifecycle {
                     RedisConstants.SECKILL_STREAM_GROUP,
                     record.getId());
         }
-        // RETRY: no ACK
+        // RETRY: no ACK — leave in PEL for a later scan (not a tight re-read loop)
+        return outcome;
     }
 
     static String buildConsumerName() {
@@ -304,7 +347,15 @@ public class SeckillOrderStreamConsumer implements SmartLifecycle {
     }
 
     /** Visible for tests. */
-    String getConsumerName() {
+    public String getConsumerName() {
         return consumerName;
+    }
+
+    public void setConsumerNameForTest(String name) {
+        this.consumerName = name;
+    }
+
+    public void markRunningForTest(boolean value) {
+        running.set(value);
     }
 }

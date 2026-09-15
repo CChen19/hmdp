@@ -35,8 +35,8 @@ redis-cli XGROUP SETID stream.orders g1 0-0
 
 On startup and every ~15s:
 
-1. `XREADGROUP` with id `0` — process **this** consumer’s pending list.
-2. `XPENDING` + `XCLAIM` — take idle messages from **dead** consumers (Spring Data Redis 2.7 has no `XAUTOCLAIM` wrapper; same effect).
+1. **Own pending** — `XPENDING` for this consumer, load body via `XRANGE`, process **each id at most once per scan**. Does **not** `XREADGROUP` id `0` (that would re-bump delivery and tight-loop `RETRY` into poison+ACK).
+2. `XPENDING` (scan window 100) + `XCLAIM` — take up to 10 idle messages from **other** consumers (own PEL ids are skipped so they cannot hide foreign idle work).
 
 **Min-idle:** `30s` (`RedisConstants.SECKILL_CLAIM_MIN_IDLE_MS`). Raise toward 60s if consumers pause longer than a brief GC.
 

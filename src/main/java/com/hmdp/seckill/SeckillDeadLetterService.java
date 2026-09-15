@@ -36,7 +36,10 @@ public class SeckillDeadLetterService extends ServiceImpl<SeckillDeadLetterMappe
         row.setPayload(payload == null ? "" : truncate(payload, 1000));
         row.setErrorMsg(errorMsg == null ? "unknown" : truncate(errorMsg, 500));
         row.setCreateTime(LocalDateTime.now());
-        save(row);
+        if (!save(row)) {
+            // Must not ACK without a durable DL row
+            throw new IllegalStateException("dead-letter save returned false for streamId=" + streamId);
+        }
         log.warn("seckill dead-letter id={} streamId={} orderId={} err={}",
                 row.getId(), streamId, orderId, errorMsg);
     }
