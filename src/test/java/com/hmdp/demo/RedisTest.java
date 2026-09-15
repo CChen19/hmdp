@@ -1,28 +1,19 @@
-import cn.hutool.core.bean.BeanUtil;
-import cn.hutool.json.JSONUtil;
-import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+package com.hmdp.demo;
+
 import com.hmdp.HmDianPingApplication;
 import com.hmdp.entity.Shop;
-import com.hmdp.entity.Voucher;
 import com.hmdp.service.impl.ShopServiceImpl;
 import com.hmdp.utils.CacheClient;
-import com.hmdp.utils.RedisConstants;
 import com.hmdp.utils.RedisIdWorker;
-import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.geo.Point;
 import org.springframework.data.redis.connection.RedisGeoCommands;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.domain.geo.GeoLocation;
-import org.springframework.http.converter.json.Jackson2ObjectMapperFactoryBean;
 
 import javax.annotation.Resource;
-import java.io.Writer;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
@@ -33,6 +24,11 @@ import java.util.stream.Collectors;
 
 import static com.hmdp.utils.RedisConstants.*;
 
+/**
+ * Redis warmup / load demos. Not part of the default {@code mvn test} suite.
+ * Run with: {@code mvn -Dgroups=demo -Dsurefire.excludedGroups= test} or {@code ./scripts/demo-warmup.sh}.
+ */
+@Tag("demo")
 @SpringBootTest(classes = HmDianPingApplication.class)
 public class RedisTest {
     @Resource
@@ -89,14 +85,6 @@ public class RedisTest {
             List<RedisGeoCommands.GeoLocation<String>> locations=new ArrayList<>(value.size());
             //写入redis
             String key = SHOP_GEO_KEY + typeId;
-            /*for (Shop shop : value) {
-                Double x = shop.getX();
-                Double y = shop.getY();
-                stringRedisTemplate.opsForGeo()
-                        .add(key
-                                , new Point(x, y)
-                                , shop.getId().toString());
-            }*/
             for (Shop shop : value) {
                 locations.add(new RedisGeoCommands.GeoLocation<>(shop.getId().toString(),new Point(shop.getX(),shop.getY())));
             }
