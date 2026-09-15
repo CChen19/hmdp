@@ -17,6 +17,10 @@ public class RedisConstants {
     public static final String CACHE_TYPE_KEY = "cache:type";
 
     public static final String SECKILL_STOCK_KEY = "seckill:stock:";
+    /** Seckill activity begin time (epoch seconds) next to stock. */
+    public static final String SECKILL_BEGIN_TIME_KEY = "seckill:begin:";
+    /** Seckill activity end time (epoch seconds) next to stock. */
+    public static final String SECKILL_END_TIME_KEY = "seckill:end:";
     public static final String BLOG_LIKED_KEY = "blog:liked:";
     public static final String FEED_KEY = "feed:";
     public static final String SHOP_GEO_KEY = "shop:geo:";

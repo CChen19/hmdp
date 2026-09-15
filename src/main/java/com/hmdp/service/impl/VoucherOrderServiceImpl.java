@@ -27,6 +27,8 @@ import org.springframework.transaction.annotation.Transactional;
 import javax.annotation.PostConstruct;
 import javax.annotation.Resource;
 import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -162,22 +164,42 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
      */
     @Override
     public Result seckillVoucher(Long voucherId) {
+        // Defense in depth: reject outside activity window before Lua
+        SeckillVoucher voucher = seckillVoucherService.getById(voucherId);
+        if (voucher == null || voucher.getBeginTime() == null || voucher.getEndTime() == null) {
+            return Result.fail("秒杀活动未开放");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        if (now.isBefore(voucher.getBeginTime())) {
+            return Result.fail("秒杀尚未开始");
+        }
+        if (now.isAfter(voucher.getEndTime())) {
+            return Result.fail("秒杀已经结束");
+        }
         //获取用户
         UserDTO user = UserHolder.getUser();
         //获取订单id
         Long orderId = redisIdWorker.nextId("order");
-        //执行lua脚本
+        long nowEpoch = now.atZone(ZoneId.systemDefault()).toEpochSecond();
+        //执行lua脚本（ARGV: voucherId, userId, orderId, nowEpoch）
         Long res = stringRedisTemplate.execute(
                 SECKILL_SCRIPT
                 , Collections.emptyList()
                 , voucherId.toString()
                 , user.getId().toString()
-                , orderId.toString());
+                , orderId.toString()
+                , String.valueOf(nowEpoch));
         //判断结果是否为0
         int r = res.intValue();
         if (r != 0) {
-            //不为0 没有购买资格
-            return Result.fail(r == 1 ? "库存不足" : "禁止重复下单");
+            //不为0 没有购买资格：1 库存不足；2 重复下单；3 不在活动时间/缺元数据
+            if (r == 1) {
+                return Result.fail("库存不足");
+            }
+            if (r == 2) {
+                return Result.fail("禁止重复下单");
+            }
+            return Result.fail("不在活动时间");
         }
         return Result.ok(orderId);
     }
@@ -302,13 +324,22 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void createVoucherOrder(VoucherOrder voucherOrder) {
-        //扣减库存
+        // Idempotent: same order id already persisted → success, do not deduct again
+        VoucherOrder existing = getById(voucherOrder.getId());
+        if (existing != null) {
+            return;
+        }
+        // DB stock is the insert gate: only insert when optimistic deduct succeeds
         boolean isSuccess = seckillVoucherService.update(
                 new LambdaUpdateWrapper<SeckillVoucher>()
                         .eq(SeckillVoucher::getVoucherId, voucherOrder.getVoucherId())
                         .gt(SeckillVoucher::getStock, 0)
                         .setSql("stock=stock-1"));
-        //创建订单
+        if (!isSuccess) {
+            // Fail the consumer message (no ACK) so it can retry; do not swallow
+            throw new RuntimeException("库存不足，扣减失败");
+        }
+        // Unique (user_id, voucher_id) will also reject a second row for the same user+voucher
         this.save(voucherOrder);
     }
 }
