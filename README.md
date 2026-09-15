@@ -8,7 +8,30 @@
 | `frontend/` | 静态前端 |
 | `docs/` | 分阶段学习笔记（Phase 0–5） |
 | `scripts/` | 启动脚本与 nginx 配置 |
-| `hmdp.sql` | 数据库初始化 |
+| `hmdp.sql` | 数据库初始化（含种子数据的完整 dump） |
+| `src/main/resources/db/migration/` | Flyway 迁移（V1 schema；V2 unique purchase key） |
+
+## 测试与 CI
+
+默认 `mvn test` **不会**跑用户生成、Redis 预热、百万 HLL 等 demo（`@Tag("demo")`，Surefire 已排除）。
+
+```bash
+# 默认安全套件（CI 同款，无需课程 MySQL/Redis 数据）
+mvn -B test
+
+# 显式跑 demo / warmup（需要本机 MySQL + Redis）
+./scripts/demo-warmup.sh
+# 或: mvn -Dgroups=demo -Dsurefire.excludedGroups= test
+```
+
+GitHub Actions（`.github/workflows/ci.yml`）：JDK 17，`mvn -B test`，触发 push / PR。
+
+## Flyway
+
+- `V1__baseline.sql`：基线表结构（schema only；V1 不含 `uk_user_voucher`）。
+- `V2__uk_user_voucher.sql`：为 `tb_voucher_order` 增加唯一购买键 `uk_user_voucher (user_id, voucher_id)`（与 orderfix 对 `hmdp.sql` 的变更对齐）。若索引已存在则跳过，适合从更新后的 dump 装库的环境；从纯 V1 空库迁移的库会在此加上该键。
+- `hmdp.sql`：人工可读的全量 dump（含 INSERT）；本地首次装库仍可用 `mysql ... < hmdp.sql`。
+- `spring.flyway.baseline-on-migrate=true`：已有本地库会 baseline，避免重复建表。空库则自动执行 V1，再执行 V2。
 
 ## 本机运行
 

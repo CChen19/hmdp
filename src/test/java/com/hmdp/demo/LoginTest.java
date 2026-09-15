@@ -1,3 +1,5 @@
+package com.hmdp.demo;
+
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.bean.copier.CopyOptions;
 import cn.hutool.core.lang.UUID;
@@ -7,7 +9,7 @@ import com.hmdp.HmDianPingApplication;
 import com.hmdp.dto.UserDTO;
 import com.hmdp.entity.User;
 import com.hmdp.mapper.UserMapper;
-import com.hmdp.service.impl.UserServiceImpl;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -24,6 +26,11 @@ import static com.hmdp.utils.RedisConstants.LOGIN_USER_KEY;
 import static com.hmdp.utils.RedisConstants.LOGIN_USER_TTL;
 import static com.hmdp.utils.SystemConstants.USER_NICK_NAME_PREFIX;
 
+/**
+ * Demo / data-generation helpers. Not part of the default {@code mvn test} suite.
+ * Run with: {@code mvn -Dgroups=demo -Dsurefire.excludedGroups= test} or {@code ./scripts/demo-warmup.sh}.
+ */
+@Tag("demo")
 @SpringBootTest(classes = HmDianPingApplication.class)
 public class LoginTest {
     @Resource
