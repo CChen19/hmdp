@@ -5,6 +5,7 @@ import com.hmdp.dto.LoginFormDTO;
 import com.hmdp.dto.Result;
 import com.hmdp.entity.User;
 
+import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpSession;
 
 /**
@@ -34,6 +35,14 @@ public interface IUserService extends IService<User> {
      * @return {@link Result}
      */
     Result login(LoginFormDTO loginForm, HttpSession session);
+
+    /**
+     * 登出：删除当前 token 对应的 Redis 会话
+     *
+     * @param request 当前请求（取 authorization 头）
+     * @return {@link Result}
+     */
+    Result logout(HttpServletRequest request);
 
     /**
      * 签到
