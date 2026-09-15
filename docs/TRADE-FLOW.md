@@ -54,11 +54,10 @@ Same MySQL transaction:
 
 Background `StockReleaseOutboxWorker`:
 
-1. `SETNX outbox:stock:done:{eventKey}`
-2. If SETNX won → `INCR seckill:stock:{voucherId}`
-3. Mark outbox `DONE`
+1. Atomic Lua on `outbox:stock:done:{eventKey}` + `seckill:stock:{voucherId}`: if `SETNX` wins then `INCR` in the same script (return 1); else return 0
+2. Mark outbox `DONE` only after Lua succeeds
 
-Replaying the same event does not double-INCR. Redis is **not** incremented inside the HTTP/cancel request TX.
+A crash cannot leave the done key set without having incremented. Replaying the same event does not double-INCR. Redis is **not** incremented inside the HTTP/cancel request TX.
 
 ## No rebuy after cancel (v1)
 

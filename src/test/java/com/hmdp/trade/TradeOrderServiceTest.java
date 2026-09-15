@@ -28,8 +28,10 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.ValueOperations;
+import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.test.util.ReflectionTestUtils;
+
+import java.util.Arrays;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -71,8 +73,6 @@ class TradeOrderServiceTest {
     private VoucherOrderMapper voucherOrderMapper;
     @Mock
     private StringRedisTemplate stringRedisTemplate;
-    @Mock
-    private ValueOperations<String, String> valueOperations;
 
     @InjectMocks
     private TradeOrderService tradeOrderService;
@@ -211,7 +211,6 @@ class TradeOrderServiceTest {
 
     @Test
     void outboxHandler_sameEventTwice_redisIncrOnce() {
-        when(stringRedisTemplate.opsForValue()).thenReturn(valueOperations);
         StockReleaseOutbox row = new StockReleaseOutbox();
         row.setId(1L);
         row.setOrderId(101L);
@@ -220,17 +219,70 @@ class TradeOrderServiceTest {
         row.setStatus(TradeConstants.OUTBOX_PENDING);
 
         String doneKey = RedisConstants.STOCK_RELEASE_DONE_KEY + "cancel:101";
-        when(valueOperations.setIfAbsent(eq(doneKey), eq("1")))
-                .thenReturn(true)
-                .thenReturn(false);
-        when(valueOperations.increment(RedisConstants.SECKILL_STOCK_KEY + "9")).thenReturn(11L);
+        String stockKey = RedisConstants.SECKILL_STOCK_KEY + "9";
+        when(stringRedisTemplate.execute(any(RedisScript.class),
+                eq(Arrays.asList(doneKey, stockKey))))
+                .thenReturn(1L)
+                .thenReturn(0L);
         when(stockReleaseOutboxMapper.update(any(StockReleaseOutbox.class), any())).thenReturn(1);
 
         assertTrue(outboxWorker.applyOnce(row));
         assertFalse(outboxWorker.applyOnce(row));
 
-        verify(valueOperations, times(1)).increment(RedisConstants.SECKILL_STOCK_KEY + "9");
-        verify(valueOperations, times(2)).setIfAbsent(eq(doneKey), eq("1"));
+        verify(stringRedisTemplate, times(2)).execute(
+                any(RedisScript.class),
+                eq(Arrays.asList(doneKey, stockKey)));
+        verify(stockReleaseOutboxMapper, times(2)).update(any(StockReleaseOutbox.class), any());
+    }
+
+    /**
+     * Crash window before Lua: Redis/script fails → do not markDone; later poll still INCR once.
+     * Models SETNX-win + INCR-fail of the old non-atomic path: next apply must still release stock.
+     */
+    @Test
+    void outboxHandler_luaFailThenRetry_stillReleasesStockOnce() {
+        StockReleaseOutbox row = new StockReleaseOutbox();
+        row.setId(2L);
+        row.setOrderId(102L);
+        row.setVoucherId(9L);
+        row.setEventKey("cancel:102");
+        row.setStatus(TradeConstants.OUTBOX_PENDING);
+
+        String doneKey = RedisConstants.STOCK_RELEASE_DONE_KEY + "cancel:102";
+        String stockKey = RedisConstants.SECKILL_STOCK_KEY + "9";
+        when(stringRedisTemplate.execute(any(RedisScript.class),
+                eq(Arrays.asList(doneKey, stockKey))))
+                .thenThrow(new RuntimeException("redis blip"))
+                .thenReturn(1L);
+        when(stockReleaseOutboxMapper.update(any(StockReleaseOutbox.class), any())).thenReturn(1);
+
+        try {
+            outboxWorker.applyOnce(row);
+            org.junit.jupiter.api.Assertions.fail("expected redis blip");
+        } catch (RuntimeException e) {
+            assertEquals("redis blip", e.getMessage());
+        }
+        verify(stockReleaseOutboxMapper, never()).update(any(StockReleaseOutbox.class), any());
+
+        assertTrue(outboxWorker.applyOnce(row));
+        verify(stockReleaseOutboxMapper, times(1)).update(any(StockReleaseOutbox.class), any());
+        verify(stringRedisTemplate, times(2)).execute(
+                any(RedisScript.class),
+                eq(Arrays.asList(doneKey, stockKey)));
+    }
+
+    @Test
+    void stockReleaseLua_setnxAndIncrAreAtomic() throws Exception {
+        String lua = org.springframework.util.StreamUtils.copyToString(
+                new org.springframework.core.io.ClassPathResource("stock_release.lua").getInputStream(),
+                java.nio.charset.StandardCharsets.UTF_8);
+        assertTrue(lua.contains("SETNX"), "must SETNX done key");
+        assertTrue(lua.contains("INCR"), "must INCR stock");
+        // Real calls: SETNX then INCR inside the ok==1 branch
+        int setnxCall = lua.indexOf("redis.call('SETNX'");
+        int incrCall = lua.indexOf("redis.call('INCR'");
+        assertTrue(setnxCall >= 0 && incrCall > setnxCall);
+        assertTrue(lua.contains("if ok == 1"));
     }
 
     @Test
