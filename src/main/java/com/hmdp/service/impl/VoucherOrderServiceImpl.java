@@ -278,6 +278,13 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         if (voucherOrder.getStatus() == null) {
             voucherOrder.setStatus(1); // 待支付
         }
+        if (voucherOrder.getCreateTime() == null) {
+            // JVM clock must author create_time: the unpaid-timeout job compares this column
+            // against LocalDateTime.now(), and the DB default (CURRENT_TIMESTAMP) follows the
+            // MySQL server clock — a host/DB timezone skew then cancels fresh orders early
+            // (UTC+8 host) or never fires (UTC-7 host).
+            voucherOrder.setCreateTime(LocalDateTime.now());
+        }
         this.save(voucherOrder);
         businessMeters.seckillFinalSuccess(voucherOrder.getId());
     }

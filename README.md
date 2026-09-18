@@ -45,6 +45,8 @@ Defaults live in `application.yaml`; override with `MYSQL_*` / `REDIS_*` env var
 
 V1 baseline → V2 `uk_user_voucher` → V3 `tb_user.role` → V4 seckill dead-letter → V5 trade outbox/audit. `hmdp.sql` is a full readable dump with seed data. `spring.flyway.baseline-on-migrate=true` for existing local DBs.
 
+Boot 2.7 manages Flyway 8.5, which ships MySQL support in the separate `flyway-mysql` artifact — it is already in `pom.xml`; without it startup fails with `Unsupported Database: MySQL 8.0`.
+
 Default `mvn test` is safe (no million-key Redis warmup / mass user inserts). Demo tags: `./scripts/demo-warmup.sh` or `mvn -Dgroups=demo -Dsurefire.excludedGroups= test`. CI: `.github/workflows/ci.yml` runs `mvn -B test` only — **no load benches**.
 
 ## Health ≠ Kubernetes liveness

@@ -179,6 +179,8 @@ Lua keeps `seckill:order:{voucherId}` (set) and also:
 
 On Lua return `2`, HTTP returns the mapped order id (or DB row), not only「禁止重复下单」。Idempotent duplicate accepts **count** as accept but do **not** re-track accept→DB lag for the same order id.
 
+**Sellout caveat:** the Lua script checks stock **before** the duplicate set. Once `seckill:stock:{id}` reaches 0 (and stays 0, e.g. no cancel release), a repeat request from a user who already bought answers `库存不足` (code 1) instead of the original order id (code 2 is never reached). The order itself is safe — `GET /voucher-order/{id}` and `/mine` still return it. Reorder the Lua checks only if the original-id answer must also hold at sellout.
+
 ### Known limits
 
 - Accept is recorded in Redis before MySQL. If Redis dies after Lua success and before consume, the buyer has an order id / accept key that may never become a MySQL row (and stock was already decremented in Redis).

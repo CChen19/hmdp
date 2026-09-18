@@ -45,6 +45,8 @@ mvn -DskipTests package && ./scripts/start-backend.sh   # API :8081
 
 迁移顺序为：V1 基线 → V2 `uk_user_voucher` → V3 `tb_user.role` → V4 秒杀死信 → V5 交易 Outbox 与审计。`hmdp.sql` 是包含示例数据的完整 SQL 导出文件，可直接阅读。对于已有的本地数据库，配置使用 `spring.flyway.baseline-on-migrate=true`。
 
+Boot 2.7 管理的 Flyway 8.5 将 MySQL 支持拆分到了独立的 `flyway-mysql` 依赖中——`pom.xml` 已包含；缺失时应用启动会直接报错 `Unsupported Database: MySQL 8.0`。
+
 默认执行 `mvn test` 不会进行百万 Key 预热或批量插入用户。演示测试需要显式运行 `./scripts/demo-warmup.sh`，或执行 `mvn -Dgroups=demo -Dsurefire.excludedGroups= test`。CI 配置位于 `.github/workflows/ci.yml`，只运行 `mvn -B test`，**不运行压测**。
 
 ## Health 不能当作 Kubernetes liveness

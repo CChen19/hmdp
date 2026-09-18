@@ -7,7 +7,7 @@ This file is the **index of what the running app does now**, versus course teach
 | Area | Behavior | Detail |
 |------|----------|--------|
 | Auth | SMS code login, Redis session, roles USER/MERCHANT/ADMIN | [`AUTH-BOUNDARIES.md`](AUTH-BOUNDARIES.md) |
-| Shop browse | Logical-expire Redis cache; miss → MySQL; Redis/DB fail → unavailable (not “不存在”) | [`SHOP-CACHE.md`](SHOP-CACHE.md) |
+| Shop browse | Logical-expire Redis cache; miss → MySQL; Redis/DB fail → unavailable (not “不存在”); geo list empty page → `[]` (never SQL error) | [`SHOP-CACHE.md`](SHOP-CACHE.md) |
 | Seckill | Lua stock + one-order-per-user → Stream `stream.orders` → SmartLifecycle consumer (PEL, XCLAIM, dead-letter) → MySQL | [`SECKILL.md`](SECKILL.md) |
 | Trade | Simulated pay, unpaid timeout cancel + stock-release outbox, merchant redeem | [`TRADE-FLOW.md`](TRADE-FLOW.md) |
 | Ops | Actuator health/metrics; ADMIN `/ops/snapshot`; bench scripts; recovery + fault drills | [`BENCH.md`](BENCH.md), [`RECOVERY.md`](RECOVERY.md) |

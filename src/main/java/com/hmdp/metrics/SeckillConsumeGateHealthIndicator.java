@@ -7,8 +7,11 @@ import org.springframework.stereotype.Component;
 
 /**
  * Seckill accept is refused while the consume gate is closed — surface that on /actuator/health.
+ * Default bean name ("seckillConsumeGateHealthIndicator") is required: Boot strips the
+ * "HealthIndicator" suffix for the /health component key. An explicit "seckillConsumeGate"
+ * name collides with {@link SeckillConsumeGate} and breaks context startup.
  */
-@Component("seckillConsumeGate")
+@Component
 public class SeckillConsumeGateHealthIndicator implements HealthIndicator {
 
     private final SeckillConsumeGate gate;

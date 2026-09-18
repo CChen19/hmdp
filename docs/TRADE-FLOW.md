@@ -32,6 +32,7 @@ Phase 2 accept/`PROCESSING` is Redis-only until the MySQL row exists; trade stat
 - Measured from `create_time` (order insert time)
 - Job: `UnpaidOrderTimeoutJob` every 30s, batch scan `status=1 AND create_time < now-15m`
 - Index: `idx_voucher_order_unpaid_ctime (status, create_time)` (Flyway V5)
+- **Clock source:** the consumer writes `create_time` from the JVM clock (`VoucherOrderServiceImpl` sets it explicitly). Do not fall back to the column default (`CURRENT_TIMESTAMP`): that follows the MySQL server clock, and a host/DB timezone skew makes the naive `create_time < now-15m` compare cancel fresh orders early (e.g. UTC+8 host vs UTC DB) or never fire (UTC-7 host). JDBC `serverTimezone=UTC` round-trips literals unchanged, so JVM-written values and JVM-computed deadlines stay consistent.
 
 ## Concurrency: pay vs cancel
 

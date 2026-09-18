@@ -62,6 +62,12 @@
             <groupId>org.flywaydb</groupId>
             <artifactId>flyway-core</artifactId>
         </dependency>
+        <!-- Flyway 8.2+ (managed by Boot 2.7) moved MySQL support out of flyway-core.
+             Without this the app fails at startup: "Unsupported Database: MySQL 8.0". -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-mysql</artifactId>
+        </dependency>
         <dependency>
             <groupId>com.baomidou</groupId>
             <artifactId>mybatis-plus-boot-starter</artifactId>

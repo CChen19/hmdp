@@ -123,6 +123,11 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
             Distance distance = result.getDistance();
             distanceMap.put(shopId, distance);
         });
+        if (ids.isEmpty()) {
+            // Empty IN () / field(id,) is invalid SQL — return an empty page instead.
+            // Reachable when shop:geo:{typeId} is missing or all shops are outside 5km.
+            return Result.ok(Collections.emptyList());
+        }
         String join = StrUtil.join(",", ids);
         List<Shop> shopList = lambdaQuery().in(Shop::getId, ids).last("order by field(id," + join + ")").list();
         for (Shop shop : shopList) {
